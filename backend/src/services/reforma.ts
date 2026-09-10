@@ -213,6 +213,12 @@ export class ReformaService {
     const diferenca = totalFuturo - totalAtual;
     const variacaoPercentual = totalAtual > 0 ? (diferenca / totalAtual) * 100 : 0;
 
+    // ---------- Mesma conta, agora por fornecedor ----------
+    // Repete a lógica acima documento a documento, agrupando por CNPJ, para
+    // mostrar onde o impacto se concentra. Cada linha carrega os números que
+    // a compõem, porque a tela exibe a memória de cálculo no hover.
+    const porFornecedor = this.impactoPorFornecedor(documentos, regra, aliq, p);
+
     // Preço: retira a carga atual e aplica a nova sobre a mesma base
     const precoNovo = precoTotal - totalAtual + totalFuturo;
 
@@ -249,6 +255,7 @@ export class ReformaService {
       variacaoPercentual,
       creditoIBSCBS,
       regimeFornecedor: regime || null,
+      porFornecedor,
 
       // Formato de linhas para a tabela comparativa da tela
       detalhamento: [
@@ -365,6 +372,80 @@ export class ReformaService {
       total: divergencias.length,
       divergencias,
     };
+  }
+
+  /**
+   * Impacto da reforma por fornecedor, no mesmo ano e com as mesmas premissas
+   * da simulação geral. Devolve ordenado pelo tamanho do impacto.
+   */
+  private impactoPorFornecedor(
+    documentos: NFeDocument[],
+    regra: any,
+    aliq: { ibsEstadual: number; ibsMunicipal: number; cbs: number },
+    p: any
+  ) {
+    const mapa = new Map<
+      string,
+      {
+        cnpj: string;
+        fornecedor: string;
+        regime: string;
+        documentos: number;
+        base: number;
+        atual: number;
+        futuro: number;
+      }
+    >();
+
+    for (const doc of documentos) {
+      const cnpj = doc.cnpjEmitente || 'sem CNPJ';
+      if (!mapa.has(cnpj)) {
+        mapa.set(cnpj, {
+          cnpj,
+          fornecedor: doc.nomeEmitente || 'Sem identificação',
+          regime: doc.regimeTributario,
+          documentos: 0,
+          base: 0,
+          atual: 0,
+          futuro: 0,
+        });
+      }
+
+      const f = mapa.get(cnpj)!;
+      const v = doc.values;
+      const base = v.baseCalculo > 0 ? v.baseCalculo : v.total;
+
+      const atual =
+        v.icms + (v.icmsST ?? 0) + (v.ipi ?? 0) + v.pis + v.cofins + v.iss + v.irrf;
+
+      const futuro =
+        v.icms * regra.icms.fator +
+        (v.icmsST ?? 0) * regra.icms.fator +
+        (v.ipi ?? 0) * regra.ipi.fator +
+        v.pis * regra.pisCofins.fator +
+        v.cofins * regra.pisCofins.fator +
+        v.iss * regra.iss.fator +
+        v.irrf +
+        (base * (aliq.ibsEstadual + aliq.ibsMunicipal + aliq.cbs)) / 100 +
+        (regra.impostoSeletivo.vigente && p.sujeitoImpostoSeletivo
+          ? (base * p.aliquotaImpostoSeletivo) / 100
+          : 0);
+
+      f.documentos++;
+      f.base += base;
+      f.atual += atual;
+      f.futuro += futuro;
+    }
+
+    return Array.from(mapa.values())
+      .map(f => ({
+        ...f,
+        diferenca: f.futuro - f.atual,
+        variacaoPercentual: f.atual > 0 ? ((f.futuro - f.atual) / f.atual) * 100 : 0,
+        /** Alíquota IBS + CBS aplicada sobre a base deste fornecedor */
+        aliquotaAplicada: aliq.ibsEstadual + aliq.ibsMunicipal + aliq.cbs,
+      }))
+      .sort((a, b) => Math.abs(b.diferenca) - Math.abs(a.diferenca));
   }
 }
 
