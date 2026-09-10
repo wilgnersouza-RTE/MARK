@@ -308,7 +308,7 @@ export const ConfiguracoesImportacao: React.FC<{
             }`}
           />
           {valor.nfeReferenciada && valor.nfeReferenciada.length !== 44 && (
-            <p className="mt-1 text-xs text-red-400">
+            <p className="mt-1 text-xs text-red-600">
               A chave de acesso tem 44 dígitos — informados: {valor.nfeReferenciada.length}.
             </p>
           )}
@@ -414,7 +414,7 @@ export const ConfiguracoesImportacao: React.FC<{
             <div
               className={`rounded-lg border p-3 text-sm ${
                 validacao.valido
-                  ? 'border-green-500/30 bg-green-500/10 text-green-300'
+                  ? 'border-green-500/30 bg-green-500/10 text-emerald-700'
                   : 'border-red-500/30 bg-red-500/10 text-red-800'
               }`}
             >
@@ -454,7 +454,7 @@ export const ConfiguracoesImportacao: React.FC<{
               key={op.id}
               className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition ${
                 op.ativo
-                  ? 'border-green-500/50 bg-green-500/10 font-semibold text-green-300'
+                  ? 'border-green-500/50 bg-green-500/10 font-semibold text-emerald-700'
                   : 'border-fundo-borda bg-fundo-card text-tinta-suave'
               }`}
             >

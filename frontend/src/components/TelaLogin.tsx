@@ -29,13 +29,13 @@ const Campo: React.FC<{ rotulo: string; children: React.ReactNode }> = ({
   children,
 }) => (
   <div className="mb-5">
-    <label className="mb-2 block text-sm font-medium text-tinta-media">{rotulo}</label>
+    <label className="mb-2 block text-sm font-semibold text-tinta-forte">{rotulo}</label>
     {children}
   </div>
 );
 
 const classeInput =
-  'w-full rounded-md border border-fundo-borda bg-fundo-eleva px-4 py-3 text-sm text-tinta-forte caret-marca-neon placeholder-gray-500 transition focus:border-marca-azul focus:outline-none focus:ring-1 focus:ring-marca-azul';
+  'w-full rounded-md border border-fundo-borda bg-fundo-eleva px-4 py-3 text-sm text-tinta-forte caret-marca-azul placeholder-tinta-suave transition focus:border-marca-azul focus:outline-none focus:ring-1 focus:ring-marca-azul';
 
 export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
   const [tela, setTela] = useState<Tela>('entrar');
@@ -208,15 +208,15 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
             </p>
           </div>
 
-          <div className="rounded-xl border border-fundo-borda bg-fundo-card p-8 shadow-2xl">
+          <div className="rounded-xl border border-fundo-borda bg-fundo-card p-8 shadow-sm">
             {erro && (
-              <div className="mb-5 rounded-md border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm leading-snug text-red-300">
+              <div className="mb-5 rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm leading-snug text-red-700">
                 {erro}
               </div>
             )}
 
             {aviso && (
-              <div className="mb-5 flex gap-2 rounded-md border border-marca-azul/30 bg-marca-azul/10 px-4 py-3 text-sm text-marca-azul">
+              <div className="mb-5 flex gap-2 rounded-md border border-marca-azul/40 bg-marca-azul/5 px-4 py-3 text-sm text-rotulo">
                 <CheckCircle size={16} className="mt-0.5 shrink-0" />
                 <span className="leading-snug">{aviso}</span>
               </div>
@@ -264,14 +264,14 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
                     <button
                       type="button"
                       onClick={() => setVerSenha(v => !v)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-tinta-fraca transition hover:text-gray-700"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-tinta-media transition hover:text-tinta-forte"
                       aria-label={verSenha ? 'Ocultar senha' : 'Mostrar senha'}
                     >
                       {verSenha ? <Eye size={18} /> : <EyeOff size={18} />}
                     </button>
                   </div>
                   {tela === 'criar' && (
-                    <p className="mt-1.5 text-xs text-tinta-suave">Mínimo de 8 caracteres.</p>
+                    <p className="mt-1.5 text-xs text-tinta-media">Mínimo de 8 caracteres.</p>
                   )}
                 </Campo>
               )}
@@ -301,12 +301,12 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
                       <button
                         type="button"
                         onClick={() => setVerSenha(v => !v)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-tinta-fraca transition hover:text-gray-700"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-tinta-media transition hover:text-tinta-forte"
                       >
                         {verSenha ? <Eye size={18} /> : <EyeOff size={18} />}
                       </button>
                     </div>
-                    <p className="mt-1.5 text-xs text-tinta-suave">Mínimo de 8 caracteres.</p>
+                    <p className="mt-1.5 text-xs text-tinta-media">Mínimo de 8 caracteres.</p>
                   </Campo>
                 </>
               )}
@@ -330,7 +330,7 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
             </form>
 
             {demorando && carregando && (
-              <p className="mt-3 text-center text-xs leading-snug text-tinta-suave">
+              <p className="mt-3 text-center text-xs leading-snug text-tinta-media">
                 O servidor pode estar iniciando após período ocioso. A primeira
                 requisição costuma levar até 30 segundos.
               </p>
@@ -344,12 +344,12 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
                       limparMensagens();
                       setTela('esqueci');
                     }}
-                    className="text-tinta-fraca transition hover:text-tinta-media hover:underline"
+                    className="font-medium text-rotulo transition hover:underline"
                   >
                     Esqueci a senha
                   </button>
                   {!primeiroAcesso && (
-                    <p className="mt-3 text-tinta-suave">
+                    <p className="mt-3 text-tinta-media">
                       Não tem acesso?{' '}
                       <button
                         onClick={() => {
@@ -371,7 +371,7 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
                     limparMensagens();
                     setTela('entrar');
                   }}
-                  className="inline-flex items-center gap-1.5 text-tinta-fraca transition hover:text-tinta-media hover:underline"
+                  className="inline-flex items-center gap-1.5 font-medium text-rotulo transition hover:underline"
                 >
                   <ArrowLeft size={14} />
                   Voltar para o login
@@ -380,7 +380,7 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
             </div>
           </div>
 
-          <p className="mt-8 text-center text-xs text-tinta-suave">
+          <p className="mt-8 text-center text-xs text-tinta-media">
             Validador da Reforma Tributária do Consumo — NF-e / NFC-e
           </p>
         </div>

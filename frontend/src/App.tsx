@@ -731,7 +731,7 @@ const DashboardContent: React.FC<{
                   />
                 }
               >
-                <span className="flex items-center gap-1 font-semibold text-green-400">
+                <span className="flex items-center gap-1 font-semibold text-emerald-700">
                   <CheckCircle size={14} />
                   {formatarInteiro(resumo.documentosConformes)}
                 </span>
@@ -751,7 +751,7 @@ const DashboardContent: React.FC<{
                   />
                 }
               >
-                <span className="flex items-center gap-1 font-semibold text-red-400">
+                <span className="flex items-center gap-1 font-semibold text-red-600">
                   <AlertTriangle size={14} />
                   {formatarInteiro(resumo.documentosComDivergencias)}
                 </span>
@@ -794,7 +794,7 @@ const DashboardContent: React.FC<{
               className={`px-4 py-2 font-semibold border-b-2 transition ${
                 activeTab === tab.id
                   ? 'border-marca-neon text-marca-neon'
-                  : 'border-transparent text-tinta-suave hover:text-gray-50'
+                  : 'border-transparent text-tinta-suave hover:text-tinta-forte'
               }`}
             >
               {tab.label}
@@ -959,7 +959,7 @@ const DashboardContent: React.FC<{
                 <div>
                   <div className="mb-2 flex items-center justify-between">
                     <span className="flex items-center gap-2 text-tinta-suave">
-                      <CheckCircle size={16} className="text-green-400" />
+                      <CheckCircle size={16} className="text-emerald-700" />
                       Conformes
                       <AjudaIcone
                         tamanho={14}
@@ -998,7 +998,7 @@ const DashboardContent: React.FC<{
                 <div>
                   <div className="mb-2 flex items-center justify-between">
                     <span className="flex items-center gap-2 text-tinta-suave">
-                      <AlertTriangle size={16} className="text-red-400" />
+                      <AlertTriangle size={16} className="text-red-600" />
                       Com divergências
                       <AjudaIcone
                         tamanho={14}

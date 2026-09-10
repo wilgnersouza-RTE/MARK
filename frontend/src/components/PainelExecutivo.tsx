@@ -44,12 +44,26 @@ function chaveMes(iso: string): string {
 }
 
 /** Cor da célula do heatmap conforme a intensidade da variação */
-function corHeatmap(valor: number, maximo: number): string {
-  if (maximo === 0 || !Number.isFinite(valor)) return 'rgba(255,255,255,0.03)';
-  const intensidade = Math.min(1, Math.abs(valor) / maximo);
-  return valor >= 0
-    ? `rgba(47, 111, 255, ${0.12 + intensidade * 0.65})`
-    : `rgba(236, 72, 153, ${0.12 + intensidade * 0.6})`;
+/**
+ * Cor da célula do heatmap.
+ *
+ * A intensidade vem de quanto do tributo está em vigor (0 a 100%); o matiz
+ * vem do sentido da linha na série inteira, e não do sinal da célula. Sem
+ * isso, um tributo que só recua apareceria azul nos anos em que ainda está
+ * cheio, invertendo a leitura.
+ */
+function corHeatmap(
+  emVigor: number,
+  sentido: 'recuo' | 'avanco' | 'estavel'
+): string {
+  if (!Number.isFinite(emVigor) || emVigor <= 0) return 'rgba(17, 17, 17, 0.03)';
+
+  const intensidade = Math.min(1, emVigor / 100);
+  const alfa = 0.10 + intensidade * 0.62;
+
+  if (sentido === 'recuo') return `rgba(236, 72, 153, ${alfa})`;
+  if (sentido === 'avanco') return `rgba(127, 43, 245, ${alfa})`;
+  return `rgba(120, 118, 112, ${alfa * 0.5})`;
 }
 
 const Chip: React.FC<{
@@ -96,7 +110,7 @@ const CartaoKPI: React.FC<{
       {variacao !== undefined && variacao !== null ? (
         <span
           className={`flex items-center gap-1 text-[11px] font-medium ${
-            variacao >= 0 ? 'text-green-400' : 'text-red-400'
+            variacao >= 0 ? 'text-emerald-700' : 'text-red-600'
           }`}
         >
           {variacao >= 0 ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
@@ -140,7 +154,7 @@ const Alerta: React.FC<{ titulo: string; detalhe: string; cor: 'vermelho' | 'amb
   >
     <AlertTriangle
       size={13}
-      className={`mt-0.5 shrink-0 ${cor === 'vermelho' ? 'text-red-400' : 'text-amber-400'}`}
+      className={`mt-0.5 shrink-0 ${cor === 'vermelho' ? 'text-red-600' : 'text-amber-600'}`}
     />
     <div className="min-w-0">
       <p className="text-xs font-semibold leading-snug text-tinta-forte">{titulo}</p>
@@ -406,7 +420,16 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
     return lista.slice(0, 2);
   }, [dados]);
 
-  // Heatmap: variação percentual de cada tributo ao longo da transição
+  /**
+   * Heatmap da transição: quanto de cada tributo está em vigor em cada ano.
+   *
+   * A primeira versão comparava cada ano contra o primeiro ano da série, e
+   * isso quebrava para os tributos novos: o IBS tem alíquota fixa de teste de
+   * 0,1% em 2027 e chega a 19,2% em 2033, o que dava "+19100%" — número
+   * correto e ilegível. Aqui a referência é o próprio valor cheio do tributo
+   * na série, então o ICMS sai de 100% e vai a 0%, e o IBS faz o caminho
+   * inverso. É o que o painel quer contar: um recua, o outro avança.
+   */
   const heatmap = useMemo(() => {
     if (transicao.length === 0) return { linhas: [], anos: [], maximo: 0 };
 
@@ -423,14 +446,24 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
     let maximo = 0;
 
     const linhas = campos.map(c => {
+      // Valor cheio do tributo na série. Zero significa que ele não aparece
+      // em nenhum ano do lote — a linha fica neutra em vez de inventar 100%.
+      const cheio = Math.max(...transicao.map(t => Math.abs(t[c.chave] || 0)));
+
       const valores = transicao.map(t => {
-        const base = transicao[0][c.chave] || 0;
         const atual = t[c.chave] || 0;
-        const variacao = base === 0 ? (atual > 0 ? 100 : 0) : ((atual - base) / base) * 100;
-        maximo = Math.max(maximo, Math.abs(variacao));
-        return { ano: t.ano, valor: atual, variacao };
+        const emVigor = cheio === 0 ? 0 : (Math.abs(atual) / cheio) * 100;
+        maximo = Math.max(maximo, emVigor);
+        return { ano: t.ano, valor: atual, variacao: emVigor };
       });
-      return { nome: c.nome, valores };
+
+      // Tributo que termina a série menor do que começou está recuando.
+      const primeiro = Math.abs(transicao[0][c.chave] || 0);
+      const ultimo = Math.abs(transicao[transicao.length - 1][c.chave] || 0);
+      const sentido: 'recuo' | 'avanco' | 'estavel' =
+        cheio === 0 || primeiro === ultimo ? 'estavel' : ultimo < primeiro ? 'recuo' : 'avanco';
+
+      return { nome: c.nome, valores, sentido };
     });
 
     return { linhas, anos, maximo };
@@ -505,7 +538,7 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
               setRegimeFiltro([]);
               setTipoFiltro([]);
             }}
-            className="ml-auto text-[11px] font-medium text-red-400 hover:text-red-300"
+            className="ml-auto text-[11px] font-medium text-red-600 hover:text-red-800"
           >
             Limpar filtros
           </button>
@@ -603,16 +636,16 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
       {heatmap.linhas.length > 0 && (
         <Painel
           titulo="Variação por tributo e ano"
-          subtitulo="% contra o primeiro ano da transição"
+          subtitulo="% do valor cheio em vigor em cada ano"
           memoria={
             <MemoriaCalculo
               titulo="Variação por tributo e ano"
-              descricao="Cada célula compara o tributo daquele ano com o mesmo tributo no primeiro ano da transição."
+              descricao="Quanto de cada tributo está em vigor em cada ano, em relação ao seu próprio valor cheio na série."
               linhas={[
-                { rotulo: 'Fórmula', valor: '(ano − base) ÷ base' },
-                { rotulo: 'Base', valor: 'primeiro ano da série' },
+                { rotulo: 'Fórmula', valor: 'ano ÷ maior valor da série' },
+                { rotulo: 'Referência', valor: 'valor cheio do próprio tributo' },
               ]}
-              origem="Verde indica recuo do tributo; vermelho, avanço."
+              origem="A base não é o primeiro ano: tributos novos entram em alíquota de teste (o IBS começa em 0,1%) e comparar contra ela produzia percentuais de milhares."
             />
           }
         >
@@ -636,10 +669,11 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
                       <td
                         key={c.ano}
                         className="rounded px-1 py-1.5 text-center font-medium text-tinta-forte"
-                        style={{ backgroundColor: corHeatmap(c.variacao, heatmap.maximo) }}
-                        title={`${linha.nome} em ${c.ano}: ${formatarMoeda(c.valor)}`}
+                        style={{ backgroundColor: corHeatmap(c.variacao, linha.sentido) }}
+                        title={`${linha.nome} em ${c.ano}: ${formatarMoeda(
+                          c.valor
+                        )} (${c.variacao.toFixed(0)}% do valor cheio)`}
                       >
-                        {c.variacao > 0 ? '+' : ''}
                         {c.variacao.toFixed(0)}%
                       </td>
                     ))}
@@ -648,8 +682,10 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
               </tbody>
             </table>
           </div>
-          <p className="mt-2 text-[10px] text-tinta-suave">
-            Azul indica avanço do tributo; rosa indica recuo. Passe o mouse para ver o valor.
+          <p className="mt-2 text-[10px] leading-snug text-tinta-suave">
+            Cada célula mostra quanto do tributo está em vigor naquele ano, em
+            relação ao seu valor cheio na série. Roxo indica tributo que avança;
+            rosa, tributo que recua. Passe o mouse para ver o valor em reais.
           </p>
         </Painel>
       )}
@@ -771,7 +807,7 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
                       <td className="py-2 font-mono text-tinta-suave">{formatarCNPJ(f.cnpj)}</td>
                       <td className="py-2 text-right text-tinta-fraca">{formatarInteiro(f.qtd)}</td>
                       <td className="py-2 text-right">
-                        <span className="rounded bg-red-500/15 px-1.5 py-0.5 font-semibold text-red-300">
+                        <span className="rounded bg-red-500/15 px-1.5 py-0.5 font-semibold text-red-700">
                           {formatarInteiro(f.divergencias)}
                         </span>
                       </td>

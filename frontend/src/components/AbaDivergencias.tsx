@@ -351,7 +351,7 @@ export const AbaDivergencias: React.FC<{
               {temFiltro && (
                 <button
                   onClick={limparFiltros}
-                  className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-red-400 hover:text-red-300"
+                  className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-red-600 hover:text-red-800"
                 >
                   <X size={14} /> Limpar filtros
                 </button>
@@ -390,7 +390,7 @@ export const AbaDivergencias: React.FC<{
                       </td>
                       <td
                         className={`px-2 py-2 text-right font-mono font-semibold ${
-                          div.diferenca < 0 ? 'text-red-400' : 'text-green-400'
+                          div.diferenca < 0 ? 'text-red-600' : 'text-emerald-700'
                         }`}
                       >
                         {formatarMoeda(div.diferenca)}
@@ -418,7 +418,7 @@ export const AbaDivergencias: React.FC<{
                   Soma das diferenças:{' '}
                   <span
                     className={`font-mono font-semibold ${
-                      totalDiferenca < 0 ? 'text-red-400' : 'text-green-400'
+                      totalDiferenca < 0 ? 'text-red-600' : 'text-emerald-700'
                     }`}
                   >
                     {formatarMoeda(totalDiferenca)}
