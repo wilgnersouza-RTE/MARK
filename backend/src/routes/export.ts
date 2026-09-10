@@ -169,10 +169,11 @@ router.get('/csv-divergencias', authenticate, async (req: Request, res: Response
  */
 router.post('/erros-importacao', authenticate, async (req: Request, res: Response) => {
   try {
-    const { erros, tipo, modelo } = req.body as {
+    const { erros, tipo, modelo, cnpjEmpresa } = req.body as {
       erros?: Array<{ nomeArquivo: string; erro: string }>;
       tipo?: string;
       modelo?: string;
+      cnpjEmpresa?: string;
     };
 
     if (!Array.isArray(erros) || erros.length === 0) {
@@ -190,6 +191,7 @@ router.post('/erros-importacao', authenticate, async (req: Request, res: Respons
       Motivo: e.erro,
       'Tipo selecionado': tipo === 'saida' ? 'Saída' : 'Entrada',
       'Modelo selecionado': rotuloModelo(String(modelo ?? '')),
+      'CNPJ informado': cnpjEmpresa || 'não informado',
       'Data da importação': new Date().toLocaleString('pt-BR'),
     }));
 
@@ -198,7 +200,7 @@ router.post('/erros-importacao', authenticate, async (req: Request, res: Respons
     // Larguras fixas: o motivo é a coluna longa e precisa caber na tela
     planilha['!cols'] = [
       { wch: 5 }, { wch: 42 }, { wch: 52 }, { wch: 68 },
-      { wch: 18 }, { wch: 20 }, { wch: 20 },
+      { wch: 18 }, { wch: 20 }, { wch: 20 }, { wch: 20 },
     ];
 
     const livro = XLSX.utils.book_new();
