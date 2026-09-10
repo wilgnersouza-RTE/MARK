@@ -25,7 +25,7 @@ import {
 } from './components/ConfiguracoesImportacao';
 import {
   formatarMoeda, formatarMoedaCompacta, formatarInteiro,
-  formatarPercentual, formatarCNPJ, formatarCNPJParcial,
+  formatarPercentual, formatarCNPJ,
 } from './utils/format';
 import {
   MODELOS_DOCUMENTO,
@@ -358,9 +358,6 @@ const UploadSection: React.FC<{
   // Arquivos que o ZIP trazia mas que não batiam com o que foi selecionado.
   const [rejeitados, setRejeitados] = useState<ArquivoRejeitado[]>([]);
   const [baixandoErros, setBaixandoErros] = useState(false);
-  // CNPJ da empresa analisada. Em branco, o servidor infere o sentido pela
-  // repetição dentro do lote.
-  const [cnpjEmpresa, setCnpjEmpresa] = useState('');
   // Preenchido quando o lote não permitiu conferir entrada x saída.
   const [sentidoNaoVerificado, setSentidoNaoVerificado] = useState<string | null>(null);
   const [mostrarConfig, setMostrarConfig] = useState(false);
@@ -376,7 +373,7 @@ const UploadSection: React.FC<{
     try {
       const resposta = await axios.post(
         `${API_URL}/api/v1/export/erros-importacao`,
-        { erros: rejeitados, tipo, modelo, cnpjEmpresa },
+        { erros: rejeitados, tipo, modelo },
         {
           headers: { Authorization: `Bearer ${token}`, 'x-session-id': sessionId },
           responseType: 'blob',
@@ -412,9 +409,6 @@ const UploadSection: React.FC<{
       formData.append('file', file);
       formData.append('tipo', tipo);
       formData.append('modelo', modelo);
-      if (cnpjEmpresa.trim()) {
-        formData.append('cnpjEmpresa', cnpjEmpresa);
-      }
       // Configurações da Reforma Tributária vão junto e ficam registradas na importação
       formData.append('configuracao', JSON.stringify(config));
 
@@ -469,7 +463,7 @@ const UploadSection: React.FC<{
           />
         </div>
 
-        <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-4 mb-4">
           <div>
             <label className="block text-sm font-medium text-tinta-media mb-2">Tipo</label>
             <select
@@ -494,24 +488,6 @@ const UploadSection: React.FC<{
                 </option>
               ))}
             </select>
-          </div>
-
-          <div className="text-left">
-            <label className="mb-2 block text-sm font-medium text-tinta-forte">
-              CNPJ da empresa
-              <span className="ml-1 font-normal text-tinta-suave">(opcional)</span>
-            </label>
-            <input
-              value={cnpjEmpresa}
-              onChange={e => setCnpjEmpresa(formatarCNPJParcial(e.target.value))}
-              placeholder="00.000.000/0000-00"
-              inputMode="numeric"
-              className="w-full rounded-lg border border-fundo-borda px-3 py-2 text-sm"
-            />
-            <p className="mt-1 text-[11px] leading-snug text-tinta-suave">
-              Informando, cada nota é conferida como entrada ou saída pelo CNPJ.
-              Em branco, o sentido é deduzido do próprio lote.
-            </p>
           </div>
         </div>
 

@@ -6,13 +6,7 @@ import { nfeParserService } from '../services/nfeParser';
 import { sessionService } from '../services/session';
 import { ImportacaoArquivo, ErroProcessamento, NFeModel } from '../types';
 import { CODIGOS_MODELO, rotuloModelo } from '../utils/modelos';
-import {
-  inferirSentido,
-  ladoDaEmpresa,
-  apenasDigitos,
-  documentoValido,
-  formatarDocumento,
-} from '../utils/sentidoImportacao';
+import { inferirSentido } from '../utils/sentidoImportacao';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -43,7 +37,7 @@ router.post('/nfe', authenticate, upload.single('file'), async (req: Request, re
 
   try {
     const sessionId = req.sessionId || (req.headers['x-session-id'] as string);
-    const { tipo, modelo, cnpjEmpresa } = req.body;
+    const { tipo, modelo } = req.body;
 
     if (!sessionId) {
       return res.status(400).json({
@@ -61,22 +55,8 @@ router.post('/nfe', authenticate, upload.single('file'), async (req: Request, re
       });
     }
 
-    // CNPJ da empresa analisada. Opcional: sem ele, o sentido é inferido
-    // pela repetição dentro do lote (ver utils/sentidoImportacao).
-    const cnpjInformado = apenasDigitos(cnpjEmpresa);
-
-    if (cnpjEmpresa && !documentoValido(cnpjInformado)) {
-      return res.status(400).json({
-        success: false,
-        error: 'O CNPJ informado não tem 14 dígitos (nem 11, no caso de CPF).',
-        timestamp: new Date().toISOString(),
-      });
-    }
-
     const tipoNormalizado = String(tipo).toLowerCase();
     const tipoDoc = (tipoNormalizado === 'entrada' ? 'Entrada' : 'Saída') as ImportacaoArquivo['tipo'];
-    const declaradoInicial: 'entrada' | 'saida' =
-      tipoNormalizado === 'entrada' ? 'entrada' : 'saida';
     const modeloDoc = parseInt(modelo, 10) as NFeModel;
 
     // Validar tipo
@@ -149,37 +129,6 @@ router.post('/nfe', authenticate, upload.single('file'), async (req: Request, re
 
         const documento = await nfeParserService.parseNFE(conteudoXML, tipoDoc, modeloDoc);
 
-        // Com o CNPJ em mão a conferência é exata e por arquivo: dá para
-        // recusar só as notas do sentido errado, em vez de derrubar o lote.
-        if (cnpjInformado) {
-          const lado = ladoDaEmpresa(documento, cnpjInformado);
-          const declarado = String(tipo).toLowerCase() === 'entrada' ? 'entrada' : 'saida';
-
-          if (lado === 'alheio') {
-            erros.push({
-              nomeArquivo,
-              erro:
-                `O CNPJ ${formatarDocumento(cnpjInformado)} não é o emitente ` +
-                'nem o destinatário desta nota.',
-            });
-            arquivosComErro++;
-            continue;
-          }
-
-          if (lado !== declarado) {
-            const rotuloLado = lado === 'entrada' ? 'entrada' : 'saída';
-            const rotuloDeclarado = declarado === 'entrada' ? 'Entrada' : 'Saída';
-            erros.push({
-              nomeArquivo,
-              erro:
-                `Você selecionou ${rotuloDeclarado}, mas para o CNPJ ` +
-                `${formatarDocumento(cnpjInformado)} esta nota é de ${rotuloLado}.`,
-            });
-            arquivosComErro++;
-            continue;
-          }
-        }
-
         documentos.push(documento);
         arquivosProcessados++;
       } catch (erro: any) {
@@ -194,13 +143,9 @@ router.post('/nfe', authenticate, upload.single('file'), async (req: Request, re
     if (documentos.length === 0) {
       return res.status(400).json({
         success: false,
-        error: cnpjInformado
-          ? `Nenhuma nota do ZIP é de ${
-              declaradoInicial === 'entrada' ? 'entrada' : 'saída'
-            } para o CNPJ ${formatarDocumento(cnpjInformado)} no modelo ` +
-            `${rotuloModelo(modeloDoc)}. Confira o tipo, o modelo e o CNPJ.`
-          : `Nenhum arquivo do ZIP corresponde a ${rotuloModelo(modeloDoc)}. ` +
-            'Confira o modelo selecionado antes de importar.',
+        error:
+          `Nenhum arquivo do ZIP corresponde a ${rotuloModelo(modeloDoc)}. ` +
+          'Confira o modelo selecionado antes de importar.',
         details: erros,
         timestamp: new Date().toISOString(),
       });
@@ -211,18 +156,12 @@ router.post('/nfe', authenticate, upload.single('file'), async (req: Request, re
     // tipo: se o lote diz uma coisa e o usuário marcou outra, a importação é
     // recusada por inteiro, porque misturar entradas com saídas na mesma
     // sessão inverte o sinal de toda a análise.
-    const sentido = cnpjInformado
-      ? {
-          sentido: declaradoInicial,
-          cnpjEmpresa: cnpjInformado,
-          justificativa: `Conferido nota a nota pelo CNPJ ${formatarDocumento(cnpjInformado)}.`,
-        }
-      : inferirSentido(documentos);
+    const sentido = inferirSentido(documentos);
 
     // O tipo é gravado como 'Entrada'/'Saída' e a inferência devolve
     // 'entrada'/'saida'. Comparar sem normalizar dava erro em toda
     // importação, inclusive nas corretas.
-    const declaradoNormalizado = declaradoInicial;
+    const declaradoNormalizado = tipoNormalizado === 'entrada' ? 'entrada' : 'saida';
 
     if (sentido.sentido && sentido.sentido !== declaradoNormalizado) {
       const declarado = declaradoNormalizado === 'entrada' ? 'Entrada' : 'Saída';
