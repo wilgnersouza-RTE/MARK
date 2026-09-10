@@ -41,6 +41,8 @@ export class DashboardService {
   private calcularResumoGeral(documentos: NFeDocument[]): ResumoGeral {
     let totalValor = 0;
     let totalICMS = 0;
+    let totalICMSST = 0;
+    let totalIPI = 0;
     let totalISS = 0;
     let totalPIS = 0;
     let totalCOFINS = 0;
@@ -50,6 +52,8 @@ export class DashboardService {
     for (const doc of documentos) {
       totalValor += doc.values.total;
       totalICMS += doc.values.icms;
+      totalICMSST += doc.values.icmsST;
+      totalIPI += doc.values.ipi;
       totalISS += doc.values.iss;
       totalPIS += doc.values.pis;
       totalCOFINS += doc.values.cofins;
@@ -61,7 +65,10 @@ export class DashboardService {
       }
     }
 
-    const totalTributos = totalICMS + totalISS + totalPIS + totalCOFINS + totalIRRF;
+    // O total precisa somar tudo que está destacado na nota. Antes o IPI e o
+    // ICMS-ST ficavam de fora, e por isso a aba Detalhado divergia do Painel.
+    const totalTributos =
+      totalICMS + totalICMSST + totalIPI + totalISS + totalPIS + totalCOFINS + totalIRRF;
     const percentualConformidade = (documentosConformes / documentos.length) * 100;
 
     return {
@@ -69,6 +76,8 @@ export class DashboardService {
       totalValor,
       totalTributos,
       totalICMS,
+      totalICMSST,
+      totalIPI,
       totalISS,
       totalPIS,
       totalCOFINS,
@@ -106,6 +115,8 @@ export class DashboardService {
       cat.valor += doc.values.total;
       const tributos =
         doc.values.icms +
+        doc.values.icmsST +
+        doc.values.ipi +
         doc.values.iss +
         doc.values.pis +
         doc.values.cofins +
@@ -149,6 +160,8 @@ export class DashboardService {
           tributos: 0,
           distribuidorPorTributo: {
             icms: 0,
+            icmsST: 0,
+            ipi: 0,
             iss: 0,
             pis: 0,
             cofins: 0,
@@ -162,11 +175,15 @@ export class DashboardService {
       reg.valor += doc.values.total;
       reg.tributos +=
         doc.values.icms +
+        doc.values.icmsST +
+        doc.values.ipi +
         doc.values.iss +
         doc.values.pis +
         doc.values.cofins +
         doc.values.irrf;
       reg.distribuidorPorTributo.icms += doc.values.icms;
+      reg.distribuidorPorTributo.icmsST += doc.values.icmsST;
+      reg.distribuidorPorTributo.ipi += doc.values.ipi;
       reg.distribuidorPorTributo.iss += doc.values.iss;
       reg.distribuidorPorTributo.pis += doc.values.pis;
       reg.distribuidorPorTributo.cofins += doc.values.cofins;
@@ -207,6 +224,8 @@ export class DashboardService {
       forn.valor += doc.values.total;
       forn.tributos +=
         doc.values.icms +
+        doc.values.icmsST +
+        doc.values.ipi +
         doc.values.iss +
         doc.values.pis +
         doc.values.cofins +
@@ -318,6 +337,8 @@ export class DashboardService {
         totalValor: 0,
         totalTributos: 0,
         totalICMS: 0,
+        totalICMSST: 0,
+        totalIPI: 0,
         totalISS: 0,
         totalPIS: 0,
         totalCOFINS: 0,

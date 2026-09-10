@@ -1,5 +1,6 @@
 import { parseStringPromise } from 'xml2js';
 import { NFeDocument, NFeModel, DocumentType, RegimeTributario, Validacao, Divergencia } from '../types';
+import { rotuloModelo } from '../utils/modelos';
 import { v4 as uuidv4 } from 'uuid';
 import { taxRulesService } from './taxRules';
 
@@ -60,11 +61,24 @@ export class NFEParserService {
 
       // A nota autorizada pela SEFAZ vem embrulhada em <nfeProc>; a nota apenas
       // assinada vem direto em <NFe>. Aceitamos as duas formas.
-      const raiz = result.nfeProc || result;
+      const raiz = result.nfeProc || result.cteProc || result;
       const nfe = raiz.NFe?.infNFe || raiz.infNFe;
 
+      // O ZIP pode misturar tipos de documento. Reconhecer o CT-e pela raiz
+      // permite dizer ao usuário exatamente o que ele importou, em vez de
+      // devolver "estrutura de XML inválida" para um arquivo perfeitamente
+      // válido que só não é uma NF-e.
       if (!nfe) {
-        throw new Error('Estrutura de XML inválida: não encontrado elemento infNFe');
+        const ehCTe = Boolean(raiz.CTe?.infCte || raiz.infCte);
+        if (ehCTe) {
+          throw new Error(
+            `Este arquivo é um CT-e (57). Você selecionou ${rotuloModelo(modelo)}. ` +
+              'O processamento de CT-e ainda não está disponível.'
+          );
+        }
+        throw new Error(
+          'Estrutura de XML inválida: não é uma NF-e nem uma NFC-e reconhecível.'
+        );
       }
 
       // Extrair dados básicos
@@ -77,7 +91,8 @@ export class NFEParserService {
       const modeloXml = parseInt(this.texto(ide?.mod), 10) as NFeModel;
       if (modeloXml !== modelo) {
         throw new Error(
-          `Modelo declarado (${modelo}) não corresponde ao modelo do XML (${modeloXml})`
+          `Você selecionou ${rotuloModelo(modelo)}, mas este arquivo é ` +
+            `${rotuloModelo(modeloXml)}.`
         );
       }
 
@@ -127,6 +142,8 @@ export class NFEParserService {
       const divergencias = await this.calcularDivergencias(
         {
           icms,
+          icmsST,
+          ipi,
           iss,
           pis,
           cofins,
@@ -271,11 +288,19 @@ export class NFEParserService {
   }
 
   /**
-   * Calcular divergências entre valores atuais e previstos na reforma
+   * Calcular divergências entre valores atuais e previstos na reforma.
+   *
+   * A lista abaixo define quais tributos são confrontados. O IPI e o ICMS-ST
+   * já estão contemplados pelo motor, mas só entram no resultado quando a
+   * alíquota esperada existir em data/tax-rules.json — sem regra cadastrada
+   * não há com o que comparar, e inventar um número aqui produziria
+   * divergência falsa na tela.
    */
   private async calcularDivergencias(
     tributos: {
       icms: number;
+      icmsST: number;
+      ipi: number;
       iss: number;
       pis: number;
       cofins: number;
@@ -286,68 +311,45 @@ export class NFEParserService {
     const divergencias: Divergencia[] = [];
     const anos = [2024, 2025, 2026, 2027];
 
+    /** rotulo exibido, chave no arquivo de regras, valor da nota, tolerância */
+    const confrontos: Array<{
+      rotulo: string;
+      chave: string;
+      atual: number;
+      tolerancia: number;
+      /** o ICMS é cadastrado em fração e precisa virar percentual */
+      emFracao?: boolean;
+    }> = [
+      { rotulo: 'ICMS', chave: 'icms', atual: tributos.icms, tolerancia: 1, emFracao: true },
+      { rotulo: 'ICMS-ST', chave: 'icmsST', atual: tributos.icmsST, tolerancia: 1, emFracao: true },
+      { rotulo: 'IPI', chave: 'ipi', atual: tributos.ipi, tolerancia: 0.5 },
+      { rotulo: 'ISS', chave: 'iss', atual: tributos.iss, tolerancia: 1 },
+      { rotulo: 'PIS', chave: 'pis', atual: tributos.pis, tolerancia: 0.1 },
+      { rotulo: 'COFINS', chave: 'cofins', atual: tributos.cofins, tolerancia: 0.1 },
+    ];
+
     for (const ano of anos) {
       const regras = await taxRulesService.getRegrasPorAno(ano);
-
       if (!regras) continue;
 
-      if (tributos.icms > 0) {
-        const previsto = this.getAliquotaPorRegime(regras.icms as Record<string, number | string | undefined>, regime) * 100;
-        const diferenca = previsto - tributos.icms;
+      for (const c of confrontos) {
+        if (c.atual <= 0) continue;
 
-        if (Math.abs(diferenca) > 1) {
+        const regra = (regras as unknown as Record<string, unknown>)[c.chave];
+        if (!regra || typeof regra !== 'object') continue;
+
+        const base = this.getAliquotaPorRegime(
+          regra as Record<string, number | string | undefined>,
+          regime
+        );
+        const previsto = c.emFracao ? base * 100 : base;
+        const diferenca = previsto - c.atual;
+
+        if (Math.abs(diferenca) > c.tolerancia) {
           divergencias.push({
-            tributo: 'ICMS',
+            tributo: c.rotulo,
             ano,
-            valorAtual: tributos.icms,
-            valorPrevisto: previsto,
-            diferenca,
-            percentual: previsto === 0 ? 0 : (diferenca / previsto) * 100,
-          });
-        }
-      }
-
-      if (tributos.iss > 0) {
-        const previsto = this.getAliquotaPorRegime(regras.iss as Record<string, number | string | undefined>, regime);
-        const diferenca = previsto - tributos.iss;
-
-        if (Math.abs(diferenca) > 0.1) {
-          divergencias.push({
-            tributo: 'ISS',
-            ano,
-            valorAtual: tributos.iss,
-            valorPrevisto: previsto,
-            diferenca,
-            percentual: previsto === 0 ? 0 : (diferenca / previsto) * 100,
-          });
-        }
-      }
-
-      if (tributos.pis > 0) {
-        const previsto = this.getAliquotaPorRegime(regras.pis as Record<string, number | string | undefined>, regime);
-        const diferenca = previsto - tributos.pis;
-
-        if (Math.abs(diferenca) > 0.01) {
-          divergencias.push({
-            tributo: 'PIS',
-            ano,
-            valorAtual: tributos.pis,
-            valorPrevisto: previsto,
-            diferenca,
-            percentual: previsto === 0 ? 0 : (diferenca / previsto) * 100,
-          });
-        }
-      }
-
-      if (tributos.cofins > 0) {
-        const previsto = this.getAliquotaPorRegime(regras.cofins as Record<string, number | string | undefined>, regime);
-        const diferenca = previsto - tributos.cofins;
-
-        if (Math.abs(diferenca) > 0.1) {
-          divergencias.push({
-            tributo: 'COFINS',
-            ano,
-            valorAtual: tributos.cofins,
+            valorAtual: c.atual,
             valorPrevisto: previsto,
             diferenca,
             percentual: previsto === 0 ? 0 : (diferenca / previsto) * 100,

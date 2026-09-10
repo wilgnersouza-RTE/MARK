@@ -31,7 +31,8 @@ export interface AuthResponse {
 }
 
 // ==================== NF-e e Modelos ====================
-export type NFeModel = 55 | 65;
+/** 55 = NF-e, 65 = NFC-e, 57 = CT-e */
+export type NFeModel = 55 | 65 | 57;
 export type DocumentType = 'Entrada' | 'Saída' | 'entrada' | 'saida';
 export type RegimeTributario = 'Regime-Regular' | 'Simples-Nacional' | 'Lucro-Real' | 'Lucro-Presumido';
 
@@ -133,6 +134,10 @@ export interface ResumoGeral {
   totalValor: number;
   totalTributos: number;
   totalICMS: number;
+  /** ICMS retido por substituição tributária (vST) */
+  totalICMSST: number;
+  /** IPI destacado (vIPI) */
+  totalIPI: number;
   totalISS: number;
   totalPIS: number;
   totalCOFINS: number;
@@ -160,6 +165,8 @@ export interface RegimeDados {
   tributos: number;
   distribuidorPorTributo: {
     icms: number;
+    icmsST: number;
+    ipi: number;
     iss: number;
     pis: number;
     cofins: number;
