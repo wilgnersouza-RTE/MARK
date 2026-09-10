@@ -4,7 +4,8 @@ import JSZip from 'jszip';
 import { authenticate } from '../middleware/auth';
 import { nfeParserService } from '../services/nfeParser';
 import { sessionService } from '../services/session';
-import { ImportacaoArquivo, ErroProcessamento } from '../types';
+import { ImportacaoArquivo, ErroProcessamento, NFeModel } from '../types';
+import { CODIGOS_MODELO, rotuloModelo } from '../utils/modelos';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -48,14 +49,14 @@ router.post('/nfe', authenticate, upload.single('file'), async (req: Request, re
     if (!tipo || !modelo) {
       return res.status(400).json({
         success: false,
-        error: 'Tipo (entrada/saida) e modelo (55/65) são obrigatórios',
+        error: 'Tipo (entrada/saída) e modelo (55, 65 ou 57) são obrigatórios',
         timestamp: new Date().toISOString(),
       });
     }
 
     const tipoNormalizado = String(tipo).toLowerCase();
     const tipoDoc = (tipoNormalizado === 'entrada' ? 'Entrada' : 'Saída') as ImportacaoArquivo['tipo'];
-    const modeloDoc = parseInt(modelo, 10) as 55 | 65;
+    const modeloDoc = parseInt(modelo, 10) as NFeModel;
 
     // Validar tipo
     if (tipoNormalizado !== 'entrada' && tipoNormalizado !== 'saida') {
@@ -67,10 +68,10 @@ router.post('/nfe', authenticate, upload.single('file'), async (req: Request, re
     }
 
     // Validar modelo
-    if (modeloDoc !== 55 && modeloDoc !== 65) {
+    if (!CODIGOS_MODELO.includes(modeloDoc as (typeof CODIGOS_MODELO)[number])) {
       return res.status(400).json({
         success: false,
-        error: 'Modelo deve ser 55 ou 65',
+        error: 'Modelo deve ser NF-e (55), NFC-e (65) ou CT-e (57)',
         timestamp: new Date().toISOString(),
       });
     }
@@ -141,7 +142,9 @@ router.post('/nfe', authenticate, upload.single('file'), async (req: Request, re
     if (documentos.length === 0) {
       return res.status(400).json({
         success: false,
-        error: 'Nenhum XML válido foi encontrado no ZIP',
+        error:
+          `Nenhum arquivo do ZIP corresponde a ${rotuloModelo(modeloDoc)}. ` +
+          'Confira o modelo selecionado antes de importar.',
         details: erros,
         timestamp: new Date().toISOString(),
       });
@@ -171,6 +174,9 @@ router.post('/nfe', authenticate, upload.single('file'), async (req: Request, re
           dataUpload: new Date().toISOString(),
           arquivosProcessados,
           arquivosComErro,
+          // A tela precisa saber o que ficou de fora. Antes esta lista só
+          // existia quando a importação falhava por inteiro.
+          erros,
           documentosImportados: documentos.length,
           totalDocumentosSessao: sessao.documentos.length,
         },
