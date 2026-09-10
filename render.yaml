@@ -1,0 +1,74 @@
+# Deploy do backend no Render (https://render.com)
+#
+# Por que Render e não Vercel: este backend mantém sessões em memória e grava
+# usuários em disco. Funções serverless são efêmeras e sem estado — os usuários
+# cadastrados sumiriam e o upload não encontraria a própria sessão. Aqui roda um
+# processo contínuo, com disco persistente montado em /app/data.
+#
+# O plano gratuito do Render NÃO permite disco persistente. Por isso os usuários
+# são guardados num Redis gerenciado (Upstash tem plano gratuito), configurado
+# pelas variáveis UPSTASH_REDIS_REST_URL e UPSTASH_REDIS_REST_TOKEN abaixo.
+# Sem elas o backend usa arquivo, e os cadastros somem a cada deploy.
+#
+# Qualquer host com processo persistente serve igualmente: Railway, Fly.io,
+# uma VPS com Docker. O que não funciona é serverless puro.
+
+services:
+  - type: web
+    name: nfe-validator-api
+    runtime: node
+    plan: free
+    region: oregon
+    rootDir: backend
+
+    # --include=dev é obrigatório: com NODE_ENV=production o npm pula as
+    # devDependencies, e o TypeScript está entre elas. Sem ele o build usa um
+    # tsc do sistema, de outra versão, e falha com erros de @types e de
+    # moduleResolution que não acontecem localmente.
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+
+    healthCheckPath: /health
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      - key: PORT
+        value: 5000
+
+      # Gerado automaticamente pelo Render e nunca exposto no repositório
+      - key: JWT_SECRET
+        generateValue: true
+
+      - key: JWT_EXPIRY
+        value: 24h
+
+      # AJUSTE OBRIGATÓRIO: a URL do frontend na Vercel.
+      # Em produção o CORS aceita SOMENTE o que estiver aqui.
+      # Aceita várias origens separadas por vírgula.
+      - key: CORS_ORIGIN
+        value: https://mark-4-yksf.vercel.app
+
+      # As tabelas fiscais (tax-rules, cclasstrib, reforma-transicao) vêm do
+      # repositório — NÃO aponte DATA_DIR para o disco, senão elas somem.
+      # Deixando sem definir, o backend usa backend/data do próprio código.
+
+      # PREENCHA no painel do Render (Environment), com os valores do seu
+      # banco Upstash. Sem isso os usuários são perdidos a cada deploy.
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+
+      - key: MAX_UPLOAD_SIZE
+        value: 52428800
+
+# Nota: discos persistentes exigem plano pago no Render. Se você migrar para um
+# plano com disco, remova as variáveis UPSTASH_* acima, defina
+# WRITABLE_DIR=/var/dados e adicione ao serviço:
+#
+#   disk:
+#     name: dados
+#     mountPath: /var/dados
+#     sizeGB: 1

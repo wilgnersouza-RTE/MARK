@@ -1,0 +1,247 @@
+{
+  "informeTecnico": "2025.002",
+  "versaoTabela": "1.31",
+  "fonte": "Portal Nacional da NF-e - aba Documentos, opcao Diversos",
+  "atencao": "ARQUIVO PARCIAL. Contem apenas os codigos visiveis na documentacao de referencia. A tabela oficial completa tem centenas de codigos e e atualizada com frequencia (v1.40 jan/2026, v1.50 abr/2026, v1.60 jun/2026). Baixe a planilha oficial e rode: npm run importar:cclasstrib -- caminho/da/planilha.csv",
+  "regraDeVinculo": "Os tres primeiros digitos do cClassTrib sao identicos ao CST-IBS/CBS. Um cClassTrib so e valido para o CST correspondente.",
+
+  "cst": [
+    {
+      "codigo": "000",
+      "descricao": "Tributação integral",
+      "grupo": "Tributação Padrão",
+      "exigeGrupoPadrao": true,
+      "exigeMonofasica": false,
+      "exigeTransfCred": false,
+      "exigeAjusteCompet": false
+    },
+    {
+      "codigo": "200",
+      "descricao": "Alíquota reduzida",
+      "grupo": "Tributação Padrão",
+      "exigeGrupoPadrao": true,
+      "exigeMonofasica": false,
+      "exigeTransfCred": false,
+      "exigeAjusteCompet": false
+    },
+    {
+      "codigo": "410",
+      "descricao": "Imunidade e não incidência",
+      "grupo": "Tributação Padrão",
+      "exigeGrupoPadrao": false,
+      "exigeMonofasica": false,
+      "exigeTransfCred": false,
+      "exigeAjusteCompet": false
+    },
+    {
+      "codigo": "510",
+      "descricao": "Diferimento",
+      "grupo": "Tributação Padrão",
+      "exigeGrupoPadrao": true,
+      "exigeMonofasica": false,
+      "exigeTransfCred": false,
+      "exigeAjusteCompet": false
+    },
+    {
+      "codigo": "515",
+      "descricao": "Diferimento com redução de alíquota",
+      "grupo": "Tributação Padrão",
+      "exigeGrupoPadrao": true,
+      "exigeMonofasica": false,
+      "exigeTransfCred": false,
+      "exigeAjusteCompet": false
+    },
+    {
+      "codigo": "550",
+      "descricao": "Suspensão",
+      "grupo": "Tributação Padrão",
+      "exigeGrupoPadrao": true,
+      "exigeMonofasica": false,
+      "exigeTransfCred": false,
+      "exigeAjusteCompet": false
+    },
+    {
+      "codigo": "620",
+      "descricao": "Tributação Monofásica",
+      "grupo": "Tributação Monofásica",
+      "exigeGrupoPadrao": false,
+      "exigeMonofasica": true,
+      "exigeTransfCred": false,
+      "exigeAjusteCompet": false
+    },
+    {
+      "codigo": "800",
+      "descricao": "Transferência de crédito",
+      "grupo": "Transferência de Crédito",
+      "exigeGrupoPadrao": false,
+      "exigeMonofasica": false,
+      "exigeTransfCred": true,
+      "exigeAjusteCompet": false
+    },
+    {
+      "codigo": "810",
+      "descricao": "Ajuste de IBS na ZFM",
+      "grupo": "Ajuste de Competência",
+      "exigeGrupoPadrao": false,
+      "exigeMonofasica": false,
+      "exigeTransfCred": false,
+      "exigeAjusteCompet": true
+    },
+    {
+      "codigo": "811",
+      "descricao": "Ajustes",
+      "grupo": "Ajuste de Competência",
+      "exigeGrupoPadrao": false,
+      "exigeMonofasica": false,
+      "exigeTransfCred": false,
+      "exigeAjusteCompet": true
+    },
+    {
+      "codigo": "830",
+      "descricao": "Exclusão da Base de Cálculo",
+      "grupo": "Tributação Padrão",
+      "exigeGrupoPadrao": true,
+      "exigeMonofasica": false,
+      "exigeTransfCred": false,
+      "exigeAjusteCompet": false
+    }
+  ],
+
+  "cClassTrib": [
+    {
+      "codigo": "000001",
+      "cst": "000",
+      "descricao": "Situações tributadas integralmente pelo IBS e CBS.",
+      "baseLegal": "LC 214/2025"
+    },
+    {
+      "codigo": "000003",
+      "cst": "000",
+      "descricao": "Regime automotivo - projetos incentivados, observado o art. 311 da Lei Complementar nº 214, de 2025.",
+      "baseLegal": "Art. 311 da LC 214/2025"
+    },
+    {
+      "codigo": "000004",
+      "cst": "000",
+      "descricao": "Regime automotivo - projetos incentivados, observado o art. 312 da Lei Complementar nº 214, de 2025.",
+      "baseLegal": "Art. 312 da LC 214/2025"
+    },
+    {
+      "codigo": "000005",
+      "cst": "000",
+      "descricao": "Operação com EAC destinado à mistura com gasolina A, mas com saída do biocombustível com destinação diversa, observado o art. 179 da Lei Complementar nº 214, de 2025.",
+      "baseLegal": "Art. 179 da LC 214/2025"
+    },
+    {
+      "codigo": "200002",
+      "cst": "200",
+      "descricao": "Fornecimento ou importação de tratores, máquinas e implementos agrícolas, destinados a produtor rural não contribuinte, e de veículos de transporte de carga.",
+      "baseLegal": "LC 214/2025"
+    },
+    {
+      "codigo": "200003",
+      "cst": "200",
+      "descricao": "Vendas de produtos destinados à alimentação humana relacionados no Anexo I da Lei Complementar nº 214, de 2025, com a especificação das respectivas classificações da NCM/SH.",
+      "baseLegal": "Anexo I da LC 214/2025"
+    },
+    {
+      "codigo": "200004",
+      "cst": "200",
+      "descricao": "Fornecimento de dispositivos médicos com a especificação das respectivas classificações da NCM/SH previstas no Anexo XII da Lei Complementar nº 214, de 2025.",
+      "baseLegal": "Anexo XII da LC 214/2025"
+    },
+    {
+      "codigo": "200005",
+      "cst": "200",
+      "descricao": "Fornecimento de dispositivos médicos com a especificação das respectivas classificações da NCM/SH previstas no Anexo IV da Lei Complementar nº 214, de 2025.",
+      "baseLegal": "Anexo IV da LC 214/2025"
+    },
+    {
+      "codigo": "200006",
+      "cst": "200",
+      "descricao": "Situação de emergência de saúde pública reconhecida pelo Poder Legislativo federal, estadual, distrital ou municipal competente, ato conjunto do Ministro da Fazenda.",
+      "baseLegal": "LC 214/2025"
+    },
+    {
+      "codigo": "200007",
+      "cst": "200",
+      "descricao": "Fornecimento dos dispositivos de acessibilidade próprios para pessoas com deficiência relacionados no Anexo XIII da Lei Complementar nº 214, de 2025.",
+      "baseLegal": "Anexo XIII da LC 214/2025"
+    },
+    {
+      "codigo": "200008",
+      "cst": "200",
+      "descricao": "Fornecimento dos dispositivos de acessibilidade próprios para pessoas com deficiência relacionados no Anexo V da Lei Complementar nº 214, de 2025.",
+      "baseLegal": "Anexo V da LC 214/2025"
+    },
+    {
+      "codigo": "200009",
+      "cst": "200",
+      "descricao": "Fornecimento dos medicamentos registrados na Anvisa, observado o art. 146 da Lei Complementar nº 214, de 2025.",
+      "baseLegal": "Art. 146 da LC 214/2025"
+    },
+    {
+      "codigo": "200010",
+      "cst": "200",
+      "descricao": "Fornecimento dos medicamentos registrados na Anvisa, quando adquiridos por órgãos da administração pública direta, autarquias, fundações públicas e entidades imunes.",
+      "baseLegal": "LC 214/2025"
+    },
+    {
+      "codigo": "200011",
+      "cst": "200",
+      "descricao": "Fornecimento das composições para nutrição enteral e parenteral, composições especiais e fórmulas nutricionais destinadas às pessoas com erros inatos do metabolismo.",
+      "baseLegal": "LC 214/2025"
+    },
+    {
+      "codigo": "200012",
+      "cst": "200",
+      "descricao": "Situação de emergência de saúde pública reconhecida pelo Poder Legislativo federal, estadual, distrital ou municipal competente, ato conjunto do Ministro da Fazenda.",
+      "baseLegal": "LC 214/2025"
+    }
+  ],
+
+  "finalidadeNFe": [
+    { "codigo": "1", "descricao": "NF-e normal" },
+    { "codigo": "2", "descricao": "NF-e complementar" },
+    { "codigo": "3", "descricao": "NF-e de ajuste" },
+    { "codigo": "4", "descricao": "Devolução de mercadoria" },
+    { "codigo": "5", "descricao": "Nota de crédito" },
+    { "codigo": "6", "descricao": "Nota de débito" }
+  ],
+
+  "tipoOperacao": [
+    { "codigo": "0", "descricao": "Entrada" },
+    { "codigo": "1", "descricao": "Saída" }
+  ],
+
+  "crt": [
+    { "codigo": "1", "descricao": "Simples Nacional" },
+    { "codigo": "2", "descricao": "Simples Nacional - excesso de sublimite da receita bruta" },
+    { "codigo": "3", "descricao": "Regime Normal" },
+    { "codigo": "4", "descricao": "Simples Nacional - Microempreendedor Individual (MEI)" }
+  ],
+
+  "tipoNFeDebito": [
+    { "codigo": "01", "descricao": "Transferência de créditos para Cooperativas" },
+    { "codigo": "02", "descricao": "Anulação de Crédito por Saídas Imunes/Isentas" },
+    { "codigo": "03", "descricao": "Débitos de notas fiscais não processadas na apuração" },
+    { "codigo": "04", "descricao": "Multa e juros" },
+    { "codigo": "05", "descricao": "Transferência de crédito de sucessão" },
+    { "codigo": "06", "descricao": "Pagamento antecipado" },
+    { "codigo": "07", "descricao": "Perda em estoque" }
+  ],
+
+  "tipoNFeCredito": [
+    { "codigo": "01", "descricao": "Multa e juros" },
+    {
+      "codigo": "02",
+      "descricao": "Apropriação de crédito presumido de IBS sobre o saldo devedor na ZFM (art. 450, § 1º, LC 214/25)"
+    },
+    { "codigo": "03", "descricao": "Retorno" }
+  ],
+
+  "indicadorBemMovelUsado": [
+    { "codigo": "0", "descricao": "Não se aplica" },
+    { "codigo": "1", "descricao": "Bem móvel usado adquirido de não contribuinte" }
+  ]
+}

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+<NFe xmlns="http://www.portalfiscal.inf.br/nfe">
+  <infNFe versao="4.00" Id="NFe35240612345678000190550010000000011000000017">
+    <ide>
+      <cUF>35</cUF><natOp>VENDA</natOp><mod>55</mod><serie>1</serie>
+      <nNF>1</nNF><dhEmi>2024-03-15T10:30:00-03:00</dhEmi><tpNF>1</tpNF>
+    </ide>
+    <emit>
+      <CNPJ>12345678000190</CNPJ><xNome>FORNECEDOR ALFA LTDA</xNome>
+      <enderEmit><xLgr>RUA TESTE</xLgr><nro>100</nro><xMun>SAO PAULO</xMun><UF>SP</UF></enderEmit>
+      <CRT>3</CRT>
+    </emit>
+    <dest>
+      <CNPJ>99888777000166</CNPJ><xNome>CLIENTE DESTINO LTDA</xNome>
+    </dest>
+    <det nItem="1">
+      <prod><cProd>001</cProd><xProd>PRODUTO TESTE</xProd><qCom>1.0000</qCom><vProd>10000.00</vProd></prod>
+    </det>
+    <total>
+      <ICMSTot>
+        <vBC>10000.00</vBC><vICMS>1800.00</vICMS><vPIS>165.00</vPIS>
+        <vCOFINS>760.00</vCOFINS><vISS>0.00</vISS><vNF>12000.00</vNF>
+      </ICMSTot>
+    </total>
+  </infNFe>
+</NFe>
+</nfeProc>

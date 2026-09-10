@@ -1,0 +1,110 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ==================== BASE ==================== */
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background-color: #0a0a0f;
+  color: #e5e7eb;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+}
+
+/* ==================== SCROLLBAR ==================== */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #13131c;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2a2a3a;
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3a4e;
+}
+
+/* ==================== FORMULÁRIOS ==================== */
+/*
+  Todo campo herda fundo e texto do tema.
+  Sem isto, inputs sem classe de cor explícita usavam o padrão do navegador —
+  fundo branco e texto preto — e ficavam ilegíveis no tema escuro.
+*/
+input,
+textarea,
+select {
+  background-color: #1c1c28;
+  color: #ffffff;
+  caret-color: #4f8cff;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #6b7280;
+}
+
+input[type='checkbox'],
+input[type='radio'],
+input[type='range'] {
+  background-color: transparent;
+}
+
+input:disabled,
+textarea:disabled,
+select:disabled {
+  color: #6b7280;
+}
+
+/* O autofill do Chrome pinta o campo de branco e quebra o tema escuro */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-text-fill-color: #ffffff;
+  -webkit-box-shadow: 0 0 0 1000px #1c1c28 inset;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+/* Setas dos <select> em tema escuro */
+select option {
+  background-color: #1c1c28;
+  color: #e5e7eb;
+}
+
+/* ==================== ANIMAÇÕES ==================== */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.15s ease-out;
+}
+
+/* Brilho sutil usado nas bordas dos cards de destaque */
+.borda-neon {
+  border: 1px solid rgba(47, 111, 255, 0.25);
+  box-shadow: 0 0 30px rgba(47, 111, 255, 0.08);
+}

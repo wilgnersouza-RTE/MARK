@@ -1,0 +1,177 @@
+{
+  "descricao": "Regras tributárias brasileiras - Reforma Tributária 2027",
+  "versao": "1.0.0",
+  "ultima_atualizacao": "2024-08-13",
+  "notas": [
+    "Valores em percentuais (0-100) para alíquotas principais",
+    "Valores em reais para tributos com valores fixos",
+    "Estes dados devem ser validados com Lei nº 14.393/2022 e atualizações posteriores",
+    "Regime tributário: simples, lucro-real, lucro-presumido",
+    "IMPORTANTE: Validar sempre com legislação atual antes de usar em produção"
+  ],
+  "anos": [
+    {
+      "ano": 2024,
+      "descricao": "Regime atual - dados de transição iniciados",
+      "icms": {
+        "simples": 7.5,
+        "lucro-real": 18.0,
+        "lucro-presumido": 12.0,
+        "descricao": "Alíquota de ICMS por regime"
+      },
+      "iss": {
+        "simples": 3.5,
+        "lucro-real": 5.0,
+        "lucro-presumido": 4.0,
+        "descricao": "Alíquota de ISS por regime"
+      },
+      "pis": {
+        "simples": 0.65,
+        "lucro-real": 1.65,
+        "lucro-presumido": 1.25,
+        "descricao": "Alíquota de PIS por regime"
+      },
+      "cofins": {
+        "simples": 3.0,
+        "lucro-real": 7.6,
+        "lucro-presumido": 5.75,
+        "descricao": "Alíquota de COFINS por regime"
+      },
+      "irrf": {
+        "simples": 0.0,
+        "lucro-real": 0.0,
+        "lucro-presumido": 0.0,
+        "descricao": "IRRF - Imposto Retido na Fonte"
+      }
+    },
+    {
+      "ano": 2025,
+      "descricao": "Primeira etapa de transição",
+      "icms": {
+        "simples": 7.0,
+        "lucro-real": 17.5,
+        "lucro-presumido": 11.5,
+        "descricao": "Alíquota de ICMS - redução de 0.5%"
+      },
+      "iss": {
+        "simples": 3.5,
+        "lucro-real": 4.8,
+        "lucro-presumido": 3.9,
+        "descricao": "Alíquota de ISS - ajustes progressivos"
+      },
+      "pis": {
+        "simples": 0.65,
+        "lucro-real": 1.6,
+        "lucro-presumido": 1.2,
+        "descricao": "Alíquota de PIS - redução gradual"
+      },
+      "cofins": {
+        "simples": 2.85,
+        "lucro-real": 7.3,
+        "lucro-presumido": 5.5,
+        "descricao": "Alíquota de COFINS - consolidação inicial"
+      },
+      "irrf": {
+        "simples": 0.0,
+        "lucro-real": 0.0,
+        "lucro-presumido": 0.0,
+        "descricao": "IRRF - sem mudanças"
+      }
+    },
+    {
+      "ano": 2026,
+      "descricao": "Segunda etapa de transição",
+      "icms": {
+        "simples": 6.5,
+        "lucro-real": 17.0,
+        "lucro-presumido": 11.0,
+        "descricao": "Alíquota de ICMS - redução de 0.5%"
+      },
+      "iss": {
+        "simples": 3.5,
+        "lucro-real": 4.6,
+        "lucro-presumido": 3.8,
+        "descricao": "Alíquota de ISS - convergência"
+      },
+      "pis": {
+        "simples": 0.65,
+        "lucro-real": 1.55,
+        "lucro-presumido": 1.15,
+        "descricao": "Alíquota de PIS - redução continuada"
+      },
+      "cofins": {
+        "simples": 2.7,
+        "lucro-real": 7.0,
+        "lucro-presumido": 5.25,
+        "descricao": "Alíquota de COFINS - consolidação progressiva"
+      },
+      "irrf": {
+        "simples": 0.0,
+        "lucro-real": 0.0,
+        "lucro-presumido": 0.0,
+        "descricao": "IRRF - sem mudanças"
+      }
+    },
+    {
+      "ano": 2027,
+      "descricao": "Nova reforma tributária implementada",
+      "icms": {
+        "simples": 5.5,
+        "lucro-real": 16.0,
+        "lucro-presumido": 10.0,
+        "descricao": "Alíquota de ICMS - piso definitivo"
+      },
+      "iss": {
+        "simples": 3.5,
+        "lucro-real": 4.5,
+        "lucro-presumido": 3.75,
+        "descricao": "Alíquota de ISS - convergência final"
+      },
+      "pis": {
+        "simples": 0.65,
+        "lucro-real": 1.5,
+        "lucro-presumido": 1.1,
+        "descricao": "Alíquota de PIS - piso mínimo"
+      },
+      "cofins": {
+        "simples": 2.5,
+        "lucro-real": 6.5,
+        "lucro-presumido": 5.0,
+        "descricao": "Alíquota de COFINS - configuração final"
+      },
+      "irrf": {
+        "simples": 0.0,
+        "lucro-real": 1.5,
+        "lucro-presumido": 1.5,
+        "descricao": "IRRF - nova retenção sobre serviços"
+      }
+    }
+  ],
+  "referencias_legais": {
+    "reforma_tributaria": {
+      "lei": "Lei nº 14.393, de 14 de julho de 2022",
+      "descricao": "Reforma Tributária do Brasil",
+      "url": "https://www.planalto.gov.br/ccivil_03/_ato2019-2022/2022/lei/l14393.htm"
+    },
+    "nfe_modelo_55": {
+      "descricao": "NF-e modelo 55 - Nota Fiscal Eletrônica (produto)",
+      "url": "https://www.gov.br/nfe/"
+    },
+    "nfe_modelo_65": {
+      "descricao": "NF-e modelo 65 - Nota Fiscal Eletrônica (serviço)",
+      "url": "https://www.gov.br/nfe/"
+    }
+  },
+  "glossario": {
+    "icms": "Imposto sobre Circulação de Mercadorias e Serviços",
+    "iss": "Imposto sobre Serviços de Qualquer Natureza",
+    "pis": "Programa de Integração Social",
+    "cofins": "Contribuição para o Financiamento da Seguridade Social",
+    "irrf": "Imposto de Renda Retido na Fonte",
+    "nfe": "Nota Fiscal Eletrônica",
+    "cnpj": "Cadastro Nacional da Pessoa Jurídica",
+    "regime_simples": "Regime Especial Unificado de Arrecadação de Tributos e Contribuições",
+    "regime_lucro_real": "Regime de tributação baseado no lucro real",
+    "regime_lucro_presumido": "Regime de tributação baseado no lucro presumido"
+  }
+}

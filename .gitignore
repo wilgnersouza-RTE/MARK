@@ -1,0 +1,30 @@
+# Dependências
+node_modules/
+
+# Build
+dist/
+build/
+
+# Variáveis de ambiente (NUNCA versionar — contêm segredos)
+.env
+.env.local
+.env.*.local
+
+# Dados gravados em execução — contêm hashes de senha e tokens de recuperação.
+# As tabelas fiscais (tax-rules, cclasstrib, reforma-transicao) SÃO versionadas;
+# apenas o cadastro de usuários fica de fora.
+backend/data/usuarios.json
+usuarios.json
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor / SO
+.DS_Store
+.vscode/
+.idea/
+
+# Uploads temporários
+uploads/
+tmp/

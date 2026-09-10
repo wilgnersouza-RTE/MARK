@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+<NFe xmlns="http://www.portalfiscal.inf.br/nfe">
+  <infNFe versao="4.00" Id="NFe35240611222333000144550010000000033000000039">
+    <ide>
+      <cUF>35</cUF><natOp>VENDA</natOp><mod>55</mod><serie>1</serie>
+      <nNF>1</nNF><dhEmi>2024-09-10T09:15:00-03:00</dhEmi><tpNF>1</tpNF>
+    </ide>
+    <emit>
+      <CNPJ>11222333000144</CNPJ><xNome>INDUSTRIA GAMA SA</xNome>
+      <enderEmit><xLgr>RUA TESTE</xLgr><nro>100</nro><xMun>SAO PAULO</xMun><UF>SP</UF></enderEmit>
+      <CRT>3</CRT>
+    </emit>
+    <dest>
+      <CNPJ>99888777000166</CNPJ><xNome>CLIENTE DESTINO LTDA</xNome>
+    </dest>
+    <det nItem="1">
+      <prod><cProd>001</cProd><xProd>PRODUTO TESTE</xProd><qCom>1.0000</qCom><vProd>80000.00</vProd></prod>
+    </det>
+    <total>
+      <ICMSTot>
+        <vBC>80000.00</vBC><vICMS>14400.00</vICMS><vPIS>1320.00</vPIS>
+        <vCOFINS>6080.00</vCOFINS><vISS>0.00</vISS><vNF>95000.00</vNF>
+      </ICMSTot>
+    </total>
+  </infNFe>
+</NFe>
+</nfeProc>
