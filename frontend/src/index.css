@@ -4,13 +4,13 @@
 
 /* ==================== BASE ==================== */
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
   margin: 0;
-  background-color: #0a0a0f;
-  color: #e5e7eb;
+  background-color: #F7F6F3;
+  color: #3D3D3A;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -28,35 +28,33 @@ code {
 }
 
 ::-webkit-scrollbar-track {
-  background: #13131c;
+  background: #F1EFE8;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #2a2a3a;
+  background: #D3D1C7;
   border-radius: 5px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #3a3a4e;
+  background: #B4B2A9;
 }
 
 /* ==================== FORMULÁRIOS ==================== */
 /*
-  Todo campo herda fundo e texto do tema.
-  Sem isto, inputs sem classe de cor explícita usavam o padrão do navegador —
-  fundo branco e texto preto — e ficavam ilegíveis no tema escuro.
+  Todo campo herda fundo e texto do tema claro do RTE.
 */
 input,
 textarea,
 select {
-  background-color: #1c1c28;
-  color: #ffffff;
-  caret-color: #4f8cff;
+  background-color: #ffffff;
+  color: #111111;
+  caret-color: #7F2BF5;
 }
 
 input::placeholder,
 textarea::placeholder {
-  color: #6b7280;
+  color: #888780;
 }
 
 input[type='checkbox'],
@@ -68,23 +66,23 @@ input[type='range'] {
 input:disabled,
 textarea:disabled,
 select:disabled {
-  color: #6b7280;
+  color: #B4B2A9;
 }
 
-/* O autofill do Chrome pinta o campo de branco e quebra o tema escuro */
+/* O autofill do Chrome repinta o campo e quebra o tema */
 input:-webkit-autofill,
 input:-webkit-autofill:hover,
 input:-webkit-autofill:focus,
 input:-webkit-autofill:active {
-  -webkit-text-fill-color: #ffffff;
-  -webkit-box-shadow: 0 0 0 1000px #1c1c28 inset;
+  -webkit-text-fill-color: #111111;
+  -webkit-box-shadow: 0 0 0 1000px #ffffff inset;
   transition: background-color 5000s ease-in-out 0s;
 }
 
 /* Setas dos <select> em tema escuro */
 select option {
-  background-color: #1c1c28;
-  color: #e5e7eb;
+  background-color: #ffffff;
+  color: #111111;
 }
 
 /* ==================== ANIMAÇÕES ==================== */
@@ -103,8 +101,8 @@ select option {
   animation: fadeIn 0.15s ease-out;
 }
 
-/* Brilho sutil usado nas bordas dos cards de destaque */
+/* Realce sutil usado nas bordas dos cards de destaque */
 .borda-neon {
-  border: 1px solid rgba(47, 111, 255, 0.25);
-  box-shadow: 0 0 30px rgba(47, 111, 255, 0.08);
+  border: 1px solid rgba(127, 43, 245, 0.28);
+  box-shadow: 0 1px 3px rgba(17, 17, 17, 0.06);
 }
