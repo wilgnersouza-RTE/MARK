@@ -6,7 +6,8 @@ import {
 } from 'recharts';
 import {
   Upload, Download, LogOut, FileText, TrendingUp, AlertTriangle,
-  CheckCircle, XCircle, Calendar, Building2, DollarSign, Settings, Shield
+  CheckCircle, XCircle, Calendar, Building2, DollarSign, Settings, Shield,
+  ChevronDown, Users, ArrowLeft, FileSpreadsheet
 } from 'lucide-react';
 
 import { MarcaRTE } from './components/Marca';
@@ -92,7 +93,14 @@ interface FornecedorDados {
 interface AppState {
   token: string | null;
   sessionId: string | null;
-  user: { userId: string; email: string } | null;
+  user: {
+    userId: string;
+    email: string;
+    nome?: string;
+    papel?: 'administrador' | 'usuario';
+    /** Presente quando um administrador assumiu esta conta */
+    assumidoPor?: { userId: string; email: string };
+  } | null;
   isLoading: boolean;
   error: string | null;
 }
@@ -145,31 +153,42 @@ const useAppStore = () => {
 // ==================== COMPONENTES ====================
 
 // Header
-const Header: React.FC<{ user: any; onLogout: () => void }> = ({ user, onLogout }) => {
-  // Iniciais do usuário para o avatar do canto direito
+const Header: React.FC<{
+  user: any;
+  onLogout: () => void;
+  /** Navegação para as páginas fora do painel (administração, configurações). */
+  onIrPara: (pagina: 'admin' | 'config') => void;
+}> = ({ user, onLogout, onIrPara }) => {
+  const [menuAberto, setMenuAberto] = useState(false);
+
+  // Clique fora fecha o menu
+  useEffect(() => {
+    if (!menuAberto) return;
+    const fechar = () => setMenuAberto(false);
+    document.addEventListener('click', fechar);
+    return () => document.removeEventListener('click', fechar);
+  }, [menuAberto]);
+
   const iniciais = (user?.nome || user?.email || '?')
-    .split(/[\s@.]+/)
-    .filter(Boolean)
+    .split(' ')
+    .map((p: string) => p[0])
     .slice(0, 2)
-    .map((p: string) => p[0]?.toUpperCase())
-    .join('');
+    .join('')
+    .toUpperCase();
+
+  const ehAdmin = user?.papel === 'administrador';
 
   return (
-    <header className="sticky top-0 z-40 border-b border-fundo-borda bg-fundo-card/95 backdrop-blur">
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-3">
+    <header className="border-b border-fundo-borda bg-fundo-card">
+      <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3">
         <div className="flex items-center gap-3">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-marca-azul to-marca-roxo text-white shadow-neon">
-            <FileText size={18} />
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-marca-azul text-white">
+            <FileText size={17} />
           </span>
           <MarcaRTE tamanho={20} />
         </div>
 
-        <div className="flex items-center gap-4">
-          {/*
-            Em sessão assumida, o cabeçalho precisa deixar isso explícito:
-            sem o aviso, o administrador pode achar que está na própria conta
-            e importar notas no lugar de outra pessoa.
-          */}
+        <div className="flex items-center gap-3">
           {user?.assumidoPor && (
             <span className="hidden items-center gap-1.5 rounded-lg border border-amber-400 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 md:flex">
               <Shield size={13} />
@@ -177,47 +196,106 @@ const Header: React.FC<{ user: any; onLogout: () => void }> = ({ user, onLogout 
             </span>
           )}
 
-          <div className="hidden text-right sm:block">
-            <p className="text-xs text-tinta-suave">Logado como</p>
-            <p className="text-sm font-semibold text-tinta-media">
-              {user?.nome || user?.email}
-              {user?.papel === 'administrador' && (
-                <span className="ml-1.5 text-xs font-normal text-marca-azul">admin</span>
-              )}
-            </p>
+          {/*
+            Todo o acesso a áreas fora do painel passa por aqui. Antes a
+            administração era uma aba ao lado de Painel e Divergências, o que
+            misturava análise com gestão de contas.
+          */}
+          <div className="relative">
+            <button
+              onClick={e => {
+                e.stopPropagation();
+                setMenuAberto(v => !v);
+              }}
+              className="flex items-center gap-2 rounded-xl border border-fundo-borda px-2.5 py-1.5 transition hover:border-marca-azul"
+              aria-haspopup="menu"
+              aria-expanded={menuAberto}
+            >
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-marca-azul text-[10px] font-bold text-white">
+                {iniciais}
+              </span>
+              <span className="hidden text-sm font-medium text-tinta-forte sm:block">
+                {user?.nome || user?.email}
+              </span>
+              <ChevronDown size={14} className="text-tinta-suave" />
+            </button>
+
+            {menuAberto && (
+              <div
+                onClick={e => e.stopPropagation()}
+                role="menu"
+                className="absolute right-0 top-12 z-40 w-64 overflow-hidden rounded-xl border border-fundo-borda bg-fundo-card shadow-xl"
+              >
+                <div className="flex items-center gap-2.5 bg-marca-azul/5 p-3.5">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-marca-azul text-xs font-bold text-white">
+                    {iniciais}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-tinta-forte">
+                      {user?.nome || user?.email}
+                    </p>
+                    <p className="truncate text-[11px] text-tinta-suave">{user?.email}</p>
+                    {ehAdmin && (
+                      <span className="mt-1 inline-block rounded bg-marca-azul/10 px-1.5 py-px text-[10px] font-semibold text-rotulo">
+                        ADMINISTRADOR
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="border-t border-fundo-borda">
+                  {ehAdmin && (
+                    <button
+                      role="menuitem"
+                      onClick={() => {
+                        setMenuAberto(false);
+                        onIrPara('admin');
+                      }}
+                      className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-sm text-tinta-forte transition hover:bg-fundo-eleva"
+                    >
+                      <Users size={16} className="text-tinta-suave" />
+                      Usuários
+                    </button>
+                  )}
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuAberto(false);
+                      onIrPara('config');
+                    }}
+                    className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-sm text-tinta-forte transition hover:bg-fundo-eleva"
+                  >
+                    <Settings size={16} className="text-tinta-suave" />
+                    Configurações
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={onLogout}
+                    className="flex w-full items-center gap-2.5 border-t border-fundo-borda px-3.5 py-2.5 text-sm text-red-600 transition hover:bg-red-50"
+                  >
+                    <LogOut size={16} />
+                    Sair
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
-
-          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-marca-azul to-marca-ciano text-xs font-bold text-white">
-            {iniciais}
-          </span>
-
-          <button
-            onClick={onLogout}
-            className="flex items-center gap-2 rounded-lg border border-fundo-borda px-3 py-2 text-sm text-tinta-fraca transition hover:border-red-500/50 hover:text-red-400"
-          >
-            <LogOut size={16} />
-            <span className="hidden sm:inline">Sair</span>
-          </button>
         </div>
       </div>
     </header>
   );
 };
 
-/**
- * Banner do topo. Se existir frontend/public/banner.jpg, ele é usado; caso
- * contrário aparece o gradiente neon abaixo, para a área nunca ficar vazia.
- */
 const Banner: React.FC = () => (
   <div
     className="relative h-56 overflow-hidden border-b border-fundo-borda bg-cover bg-center md:h-72"
     style={{ backgroundImage: "url('/banner.jpg')" }}
   >
-    <div className="absolute inset-0 bg-marca-roxo" />
+    <div className="absolute inset-0 bg-fundo-card" />
 
     <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center">
-      <MarcaRTE tamanho={52} invertida />
-      <p className="mt-3 max-w-xl text-sm text-white/75 md:text-base">
+      <MarcaRTE tamanho={52} />
+      <p className="mt-3 max-w-xl text-sm text-tinta-forte md:text-base">
         Validador da Reforma Tributária do Consumo — NF-e / NFC-e
       </p>
     </div>
@@ -270,15 +348,50 @@ const UploadSection: React.FC<{
   sessionId: string;
   token: string;
   onUploadSuccess: () => Promise<void>;
-}> = ({ sessionId, token, onUploadSuccess }) => {
+  config: TipoConfig;
+  onConfigChange: (c: TipoConfig) => void;
+}> = ({ sessionId, token, onUploadSuccess, config, onConfigChange }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [tipo, setTipo] = useState<'entrada' | 'saida'>('entrada');
   const [modelo, setModelo] = useState<ModeloDocumento>('55');
   // Arquivos que o ZIP trazia mas que não batiam com o que foi selecionado.
   const [rejeitados, setRejeitados] = useState<ArquivoRejeitado[]>([]);
+  const [baixandoErros, setBaixandoErros] = useState(false);
+  // Preenchido quando o lote não permitiu conferir entrada x saída.
+  const [sentidoNaoVerificado, setSentidoNaoVerificado] = useState<string | null>(null);
   const [mostrarConfig, setMostrarConfig] = useState(false);
-  const [config, setConfig] = useState<TipoConfig>(CONFIGURACAO_PADRAO);
+
+  /**
+   * Baixa a planilha com todos os arquivos recusados.
+   *
+   * A lista é reenviada ao servidor porque, quando a importação falha por
+   * inteiro, nada foi gravado na sessão — e é aí que a planilha serve.
+   */
+  const exportarErros = async () => {
+    setBaixandoErros(true);
+    try {
+      const resposta = await axios.post(
+        `${API_URL}/api/v1/export/erros-importacao`,
+        { erros: rejeitados, tipo, modelo },
+        {
+          headers: { Authorization: `Bearer ${token}`, 'x-session-id': sessionId },
+          responseType: 'blob',
+        }
+      );
+
+      const url = URL.createObjectURL(new Blob([resposta.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `xmls-recusados-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setUploadError('Não foi possível gerar a planilha de erros.');
+    } finally {
+      setBaixandoErros(false);
+    }
+  };
 
   const handleFileUpload = async (file: File) => {
     if (!file.name.endsWith('.zip')) {
@@ -289,6 +402,7 @@ const UploadSection: React.FC<{
     setIsUploading(true);
     setUploadError(null);
     setRejeitados([]);
+    setSentidoNaoVerificado(null);
 
     try {
       const formData = new FormData();
@@ -310,6 +424,9 @@ const UploadSection: React.FC<{
         // Importação parcial: alguns XMLs entraram, outros foram recusados.
         // Antes isso passava em silêncio e o usuário só via o total errado.
         setRejeitados(response.data.data?.erros ?? []);
+        setSentidoNaoVerificado(
+          response.data.data?.importacao?.sentidoNaoVerificado ?? null
+        );
         await onUploadSuccess();
       } else {
         setUploadError(response.data.error);
@@ -389,16 +506,37 @@ const UploadSection: React.FC<{
           {isUploading ? 'Processando...' : 'Escolher arquivo ZIP'}
         </label>
 
-        {uploadError && <p className="text-red-600 text-sm mt-4">{uploadError}</p>}
+        {uploadError && <p className="mt-4 text-sm text-red-600">{uploadError}</p>}
+
+        {sentidoNaoVerificado && (
+          <p className="mt-4 rounded-lg border border-fundo-borda bg-fundo-eleva px-3 py-2 text-left text-xs text-tinta-media">
+            Entrada ou saída não pôde ser conferido neste lote. {sentidoNaoVerificado}
+          </p>
+        )}
 
         {rejeitados.length > 0 && (
           <div className="mt-4 rounded-lg border border-amber-400/60 bg-amber-50 p-4 text-left">
-            <p className="flex items-center gap-2 text-sm font-semibold text-amber-800">
-              <AlertTriangle size={16} />
-              {rejeitados.length} arquivo{rejeitados.length > 1 ? 's' : ''} não
-              {rejeitados.length > 1 ? ' foram' : ' foi'} importado
-              {rejeitados.length > 1 ? 's' : ''}
-            </p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="flex items-center gap-2 text-sm font-semibold text-amber-800">
+                <AlertTriangle size={16} />
+                {rejeitados.length} arquivo{rejeitados.length > 1 ? 's' : ''} não
+                {rejeitados.length > 1 ? ' foram' : ' foi'} importado
+                {rejeitados.length > 1 ? 's' : ''}
+              </p>
+
+              {/*
+                A lista na tela mostra só os oito primeiros. Com dezenas de
+                recusas, analisar exige a planilha completa.
+              */}
+              <button
+                onClick={exportarErros}
+                disabled={baixandoErros}
+                className="flex items-center gap-1.5 rounded-lg border border-amber-500 px-3 py-1.5 text-xs font-semibold text-amber-900 transition hover:bg-amber-100 disabled:opacity-50"
+              >
+                <FileSpreadsheet size={14} />
+                {baixandoErros ? 'Gerando…' : 'Exportar erros em Excel'}
+              </button>
+            </div>
             <ul className="mt-2 space-y-1">
               {rejeitados.slice(0, 8).map((r, i) => (
                 <li key={i} className="text-xs leading-snug text-amber-900">
@@ -433,7 +571,7 @@ const UploadSection: React.FC<{
 
       {mostrarConfig && (
         <div className="mt-4 rounded-lg border border-marca-azul/30 bg-fundo-card p-4 text-left">
-          <ConfiguracoesImportacao valor={config} onChange={setConfig} />
+          <ConfiguracoesImportacao valor={config} onChange={onConfigChange} />
         </div>
       )}
     </Card>
@@ -649,12 +787,6 @@ const DashboardContent: React.FC<{
             { id: 'regimes', label: '🏢 Regimes' },
             { id: 'transicao', label: '📈 Transição' },
             { id: 'reforma', label: '🏛️ Reforma 2027-2033' },
-            // A aba só existe para administradores. O backend confere o papel
-            // de novo em cada rota, então esconder aqui é conveniência, não
-            // a proteção em si.
-            ...(usuario?.papel === 'administrador'
-              ? [{ id: 'admin', label: '🛡️ Administração' }]
-              : []),
           ].map(tab => (
             <button
               key={tab.id}
@@ -1053,15 +1185,6 @@ const DashboardContent: React.FC<{
             </ResponsiveContainer>
           </Card>
         )}
-        {activeTab === 'admin' && usuario?.papel === 'administrador' && (
-          <AbaAdministracao
-            token={token}
-            sessionId={sessionId}
-            usuarioAtualId={usuario.userId}
-            onAssumirUsuario={onAssumirUsuario}
-          />
-        )}
-
         {activeTab === 'reforma' && (
           <AbaReforma sessionId={sessionId} token={token} />
         )}
@@ -1099,6 +1222,10 @@ const App: React.FC = () => {
   const [transicao, setTransicao] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [appError, setAppError] = useState<string | null>(null);
+  const [pagina, setPagina] = useState<'painel' | 'admin' | 'config'>('painel');
+  // A configuração da reforma vive aqui porque agora é editável em dois
+  // lugares: no card de importação e na página de Configurações.
+  const [config, setConfig] = useState<TipoConfig>(CONFIGURACAO_PADRAO);
 
   /**
    * Troca a sessão pela de outro usuário, a pedido do administrador.
@@ -1211,19 +1338,78 @@ const App: React.FC = () => {
     );
   }
 
+  // ---------- Páginas fora do painel ----------
+  // Administração e Configurações deixam de ser abas e passam a ser páginas
+  // próprias, abertas pelo menu do nome. Sem banner e sem o card de
+  // importação, para não misturar gestão com análise.
+  if (pagina !== 'painel') {
+    const ehAdmin = state.user?.papel === 'administrador';
+
+    return (
+      <div className="min-h-screen bg-fundo">
+        <Header user={state.user} onLogout={logout} onIrPara={setPagina} />
+
+        <main className="mx-auto max-w-7xl px-6 py-6">
+          <button
+            onClick={() => setPagina('painel')}
+            className="mb-1 flex items-center gap-1.5 text-xs font-medium text-rotulo transition hover:underline"
+          >
+            <ArrowLeft size={14} />
+            Voltar ao painel
+          </button>
+          <p className="mb-5 text-xs text-tinta-suave">
+            {pagina === 'admin' ? 'Administração' : 'Configurações'}
+          </p>
+
+          {pagina === 'admin' &&
+            (ehAdmin ? (
+              <AbaAdministracao
+                token={state.token}
+                sessionId={state.sessionId!}
+                usuarioAtualId={state.user?.userId ?? ''}
+                onAssumirUsuario={assumirUsuario}
+              />
+            ) : (
+              <p className="rounded-lg border border-fundo-borda bg-fundo-card p-6 text-sm text-tinta-media">
+                Esta área é restrita a administradores.
+              </p>
+            ))}
+
+          {pagina === 'config' && (
+            <div>
+              <h2 className="text-xl font-bold text-tinta-forte">Configurações</h2>
+              <p className="mb-4 text-sm text-tinta-suave">
+                Parâmetros aplicados às próximas importações
+              </p>
+              <div className="rounded-lg border border-fundo-borda bg-fundo-card p-5">
+                <ConfiguracoesImportacao valor={config} onChange={setConfig} />
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-fundo">
-      <Header user={state.user} onLogout={logout} />
+      <Header user={state.user} onLogout={logout} onIrPara={setPagina} />
       <Banner />
 
       <main className="max-w-7xl mx-auto px-6 py-8">
         {appError && (
-          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/40 text-red-300 rounded-lg">
+          <div className="mb-6 rounded-lg border border-red-300 bg-red-50 p-4 text-red-700">
             {appError}
           </div>
         )}
 
-        <UploadSection sessionId={state.sessionId!} token={state.token} onUploadSuccess={refreshDashboard} />
+        <UploadSection
+          sessionId={state.sessionId!}
+          token={state.token}
+          onUploadSuccess={refreshDashboard}
+          config={config}
+          onConfigChange={setConfig}
+        />
 
         <div className="mt-8">
           <DashboardContent

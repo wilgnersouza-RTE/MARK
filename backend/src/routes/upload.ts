@@ -6,6 +6,7 @@ import { nfeParserService } from '../services/nfeParser';
 import { sessionService } from '../services/session';
 import { ImportacaoArquivo, ErroProcessamento, NFeModel } from '../types';
 import { CODIGOS_MODELO, rotuloModelo } from '../utils/modelos';
+import { inferirSentido } from '../utils/sentidoImportacao';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -150,6 +151,33 @@ router.post('/nfe', authenticate, upload.single('file'), async (req: Request, re
       });
     }
 
+    // ---------- Validação do sentido declarado ----------
+    // O modelo já foi conferido arquivo por arquivo no parser. Aqui sobra o
+    // tipo: se o lote diz uma coisa e o usuário marcou outra, a importação é
+    // recusada por inteiro, porque misturar entradas com saídas na mesma
+    // sessão inverte o sinal de toda a análise.
+    const sentido = inferirSentido(documentos);
+
+    // O tipo é gravado como 'Entrada'/'Saída' e a inferência devolve
+    // 'entrada'/'saida'. Comparar sem normalizar dava erro em toda
+    // importação, inclusive nas corretas.
+    const declaradoNormalizado = tipoNormalizado === 'entrada' ? 'entrada' : 'saida';
+
+    if (sentido.sentido && sentido.sentido !== declaradoNormalizado) {
+      const declarado = declaradoNormalizado === 'entrada' ? 'Entrada' : 'Saída';
+      const detectado = sentido.sentido === 'entrada' ? 'entrada' : 'saída';
+
+      return res.status(400).json({
+        success: false,
+        error:
+          `Você selecionou ${declarado}, mas este ZIP é de ${detectado}. ` +
+          sentido.justificativa,
+        details: erros,
+        sentidoDetectado: sentido,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
     // Criar registro de importação
     const importacao: ImportacaoArquivo = {
       sessionId,
@@ -177,6 +205,9 @@ router.post('/nfe', authenticate, upload.single('file'), async (req: Request, re
           // A tela precisa saber o que ficou de fora. Antes esta lista só
           // existia quando a importação falhava por inteiro.
           erros,
+          // Quando o lote é pequeno ou heterogêneo, o sentido não pode ser
+          // conferido. A tela avisa em vez de dar a validação por feita.
+          sentidoNaoVerificado: sentido.sentido ? null : sentido.justificativa,
           documentosImportados: documentos.length,
           totalDocumentosSessao: sessao.documentos.length,
         },

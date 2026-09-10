@@ -84,7 +84,7 @@ const CartaoKPI: React.FC<{
     }`}
   >
     <div className="mb-1 flex items-center gap-1.5">
-      <span className="text-[11px] font-semibold uppercase tracking-wider text-tinta-suave">
+      <span className="text-[11px] font-semibold uppercase tracking-wider text-tinta-forte">
         {rotulo}
       </span>
       {memoria && <AjudaIcone tamanho={12} largura={320} conteudo={memoria} />}
@@ -473,7 +473,7 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
 
       {/* ==================== FILTROS ==================== */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-fundo-borda bg-fundo-card px-4 py-3">
-        <span className="text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-tinta-forte">
           Regime
         </span>
         {regimes.map(r => (
@@ -486,7 +486,7 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
           </Chip>
         ))}
 
-        <span className="ml-2 text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
+        <span className="ml-2 text-[11px] font-semibold uppercase tracking-wider text-tinta-forte">
           Tipo
         </span>
         {['entrada', 'saida'].map(t => (
@@ -620,9 +620,9 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
             <table className="w-full border-separate border-spacing-[2px] text-[11px]">
               <thead>
                 <tr>
-                  <th className="w-24 text-left font-medium text-tinta-suave" />
+                  <th className="w-24 text-left font-semibold text-tinta-forte" />
                   {heatmap.anos.map(a => (
-                    <th key={a} className="pb-1 text-center font-medium text-tinta-suave">
+                    <th key={a} className="pb-1 text-center font-semibold text-tinta-forte">
                       {a}
                     </th>
                   ))}
@@ -631,7 +631,7 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
               <tbody>
                 {heatmap.linhas.map(linha => (
                   <tr key={linha.nome}>
-                    <td className="pr-2 text-left font-medium text-tinta-media">{linha.nome}</td>
+                    <td className="pr-2 text-left font-medium text-rotulo">{linha.nome}</td>
                     {linha.valores.map(c => (
                       <td
                         key={c.ano}
@@ -674,7 +674,7 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
           <div className="space-y-2">
             {dados.tributosLista.map(t => (
               <div key={t.nome} className="flex items-center gap-3">
-                <span className="w-16 shrink-0 text-[11px] text-tinta-fraca">{t.nome}</span>
+                <span className="w-16 shrink-0 text-[11px] font-medium text-rotulo">{t.nome}</span>
                 <div className="h-5 flex-1 overflow-hidden rounded bg-fundo-eleva">
                   <div
                     className="flex h-5 items-center justify-end rounded bg-gradient-to-r from-marca-azul to-marca-ciano px-2"
@@ -714,7 +714,7 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
           <div className="space-y-2">
             {dados.fornecedores.slice(0, 10).map(f => (
               <div key={f.cnpj} className="flex items-center gap-3">
-                <span className="w-36 shrink-0 truncate text-[11px] text-tinta-fraca" title={f.nome}>
+                <span className="w-36 shrink-0 truncate text-[11px] font-medium text-rotulo" title={f.nome}>
                   {f.nome}
                 </span>
                 <div className="h-5 flex-1 overflow-hidden rounded bg-fundo-eleva">
@@ -752,7 +752,7 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
           <div className="overflow-x-auto">
             <table className="w-full text-[11px]">
               <thead>
-                <tr className="text-left text-tinta-suave">
+                <tr className="text-left text-tinta-forte">
                   <th className="pb-2 font-medium">FORNECEDOR</th>
                   <th className="pb-2 font-medium">CNPJ</th>
                   <th className="pb-2 text-right font-medium">NOTAS</th>
@@ -767,7 +767,7 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
                   .slice(0, 6)
                   .map(f => (
                     <tr key={f.cnpj} className="border-t border-fundo-borda">
-                      <td className="max-w-[150px] truncate py-2 text-tinta-media">{f.nome}</td>
+                      <td className="max-w-[150px] truncate py-2 font-medium text-rotulo">{f.nome}</td>
                       <td className="py-2 font-mono text-tinta-suave">{formatarCNPJ(f.cnpj)}</td>
                       <td className="py-2 text-right text-tinta-fraca">{formatarInteiro(f.qtd)}</td>
                       <td className="py-2 text-right">
@@ -811,7 +811,7 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
           <div className="overflow-x-auto">
             <table className="w-full text-[11px]">
               <thead>
-                <tr className="text-left text-tinta-suave">
+                <tr className="text-left text-tinta-forte">
                   <th className="pb-2 font-medium">REGIME</th>
                   <th className="pb-2 text-right font-medium">FORNECEDORES</th>
                   <th className="pb-2 text-right font-medium">NOTAS</th>

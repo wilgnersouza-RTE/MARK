@@ -179,7 +179,7 @@ export const AbaAdministracao: React.FC<Props> = ({
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-fundo-borda text-xs text-tinta-suave">
+                <tr className="border-b border-fundo-borda text-xs text-tinta-forte">
                   <th className="py-2 text-left font-normal">Nome completo</th>
                   <th className="py-2 text-left font-normal">E-mail</th>
                   <th className="py-2 text-left font-normal">Papel</th>

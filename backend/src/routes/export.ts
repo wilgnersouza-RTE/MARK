@@ -3,6 +3,8 @@
  * GET /api/v1/export/excel - Exportar análise em Excel
  */
 import { Router, Request, Response } from 'express';
+import * as XLSX from 'xlsx';
+import { rotuloModelo } from '../utils/modelos';
 import { authenticate } from '../middleware/auth';
 import { sessionService } from '../services/session';
 import { excelExportService } from '../services/export';
@@ -152,6 +154,70 @@ router.get('/csv-divergencias', authenticate, async (req: Request, res: Response
     res.status(500).json({
       success: false,
       error: error.message || 'Erro ao exportar dados',
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+/**
+ * Planilha dos arquivos recusados na importação.
+ *
+ * Recebe a lista por POST em vez de ler da sessão porque, quando a
+ * importação falha inteira, nada é gravado na sessão — e é justamente nesse
+ * caso que a planilha de erros mais serve. A tela já tem os dados na mão e
+ * só os devolve para virarem arquivo.
+ */
+router.post('/erros-importacao', authenticate, async (req: Request, res: Response) => {
+  try {
+    const { erros, tipo, modelo } = req.body as {
+      erros?: Array<{ nomeArquivo: string; erro: string }>;
+      tipo?: string;
+      modelo?: string;
+    };
+
+    if (!Array.isArray(erros) || erros.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Nenhum erro para exportar.',
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    const linhas = erros.map((e, i) => ({
+      '#': i + 1,
+      Arquivo: (e.nomeArquivo || '').split('/').pop() || e.nomeArquivo,
+      'Caminho no ZIP': e.nomeArquivo,
+      Motivo: e.erro,
+      'Tipo selecionado': tipo === 'saida' ? 'Saída' : 'Entrada',
+      'Modelo selecionado': rotuloModelo(String(modelo ?? '')),
+      'Data da importação': new Date().toLocaleString('pt-BR'),
+    }));
+
+    const planilha = XLSX.utils.json_to_sheet(linhas);
+
+    // Larguras fixas: o motivo é a coluna longa e precisa caber na tela
+    planilha['!cols'] = [
+      { wch: 5 }, { wch: 42 }, { wch: 52 }, { wch: 68 },
+      { wch: 18 }, { wch: 20 }, { wch: 20 },
+    ];
+
+    const livro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(livro, planilha, 'Arquivos recusados');
+
+    const buffer = XLSX.write(livro, { bookType: 'xlsx', type: 'buffer' });
+    const filename = `xmls-recusados-${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (error: any) {
+    console.error('Erro ao exportar arquivos recusados:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Erro ao gerar a planilha.',
       timestamp: new Date().toISOString(),
     });
   }

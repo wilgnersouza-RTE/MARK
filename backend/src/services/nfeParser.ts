@@ -3,6 +3,7 @@ import { NFeDocument, NFeModel, DocumentType, RegimeTributario, Validacao, Diver
 import { rotuloModelo } from '../utils/modelos';
 import { v4 as uuidv4 } from 'uuid';
 import { taxRulesService } from './taxRules';
+import { reformaService } from './reforma';
 
 export class NFEParserService {
   /**
@@ -359,6 +360,39 @@ export class NFEParserService {
             percentual: previsto === 0 ? 0 : (diferenca / previsto) * 100,
           });
         }
+      }
+    }
+
+    // ---------- IPI e ICMS-ST ----------
+    // Estes dois não têm alíquota esperada em tax-rules.json, mas a tabela
+    // de transição da reforma (data/reforma-transicao.json, com base legal
+    // declarada no próprio arquivo) traz o fator de cada ano: o IPI vai a
+    // zero em 2027, com exceção da Zona Franca, e o ICMS-ST acompanha o
+    // fator do ICMS. O previsto sai daí, sem número arbitrado.
+    for (const ano of [2027, 2028, 2029, 2030, 2031, 2032, 2033]) {
+      const regraAno = reformaService.obterRegra(ano);
+      if (!regraAno) continue;
+
+      const porFator: Array<{ rotulo: string; atual: number; fator: number }> = [
+        { rotulo: 'IPI', atual: tributos.ipi, fator: regraAno.ipi?.fator ?? 1 },
+        { rotulo: 'ICMS-ST', atual: tributos.icmsST, fator: regraAno.icms?.fator ?? 1 },
+      ];
+
+      for (const t of porFator) {
+        if (t.atual <= 0) continue;
+
+        const previsto = t.atual * t.fator;
+        const diferenca = previsto - t.atual;
+        if (Math.abs(diferenca) < 0.01) continue;
+
+        divergencias.push({
+          tributo: t.rotulo,
+          ano,
+          valorAtual: t.atual,
+          valorPrevisto: previsto,
+          diferenca,
+          percentual: t.atual === 0 ? 0 : (diferenca / t.atual) * 100,
+        });
       }
     }
 

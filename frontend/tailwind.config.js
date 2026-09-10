@@ -21,11 +21,15 @@ export default {
           neon: '#9B5CF7',
         },
         tinta: {
-          forte: '#111111',  // títulos
-          media: '#3D3D3A',  // texto corrido
-          fraca: '#5F5E5A',  // texto de apoio
-          suave: '#888780',  // legendas e placeholders
+          forte: '#111111',  // títulos e cabeçalhos de coluna
+          media: '#3D3D3A',  // texto corrido e valores
+          fraca: '#4A4945',  // texto de apoio
+          suave: '#5F5E5A',  // legendas e placeholders
         },
+        // Roxo de leitura: usado em nome de tributo e de fornecedor. Mais
+        // fechado que o roxo de ação, para o texto não brigar com o fundo
+        // claro sem chegar ao preto dos títulos.
+        rotulo: '#6A1FD0',
       },
       boxShadow: {
         neon: '0 1px 3px rgba(17, 17, 17, 0.06)',
