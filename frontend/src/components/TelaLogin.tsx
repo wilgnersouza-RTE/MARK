@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { Eye, EyeOff, ArrowLeft, CheckCircle, Loader2 } from 'lucide-react';
 import { API_URL, mensagemDeFalhaDeRede } from '../utils/api';
+import { MarcaRTE } from './Marca';
 
 
 type Tela = 'entrar' | 'criar' | 'esqueci' | 'redefinir';
@@ -10,14 +11,9 @@ interface Props {
   onAutenticado: (dados: { token: string; sessionId: string; user: any }) => void;
 }
 
-/** Marca da aplicação. O ".net" em azul é o traço do logotipo. */
+/** Marca da aplicação. */
 const Logotipo: React.FC<{ tamanho?: 'grande' | 'pequeno' }> = ({ tamanho = 'grande' }) => (
-  <span
-    className={`font-bold tracking-tight ${tamanho === 'grande' ? 'text-2xl' : 'text-base'}`}
-  >
-    <span className="text-white">Contabilidade</span>
-    <span className="text-blue-500">.net</span>
-  </span>
+  <MarcaRTE tamanho={tamanho === 'grande' ? 26 : 17} />
 );
 
 /**
@@ -33,13 +29,13 @@ const Campo: React.FC<{ rotulo: string; children: React.ReactNode }> = ({
   children,
 }) => (
   <div className="mb-5">
-    <label className="mb-2 block text-sm font-medium text-gray-300">{rotulo}</label>
+    <label className="mb-2 block text-sm font-medium text-tinta-media">{rotulo}</label>
     {children}
   </div>
 );
 
 const classeInput =
-  'w-full rounded-md border border-fundo-borda bg-fundo-eleva px-4 py-3 text-sm text-white caret-marca-neon placeholder-gray-500 transition focus:border-marca-azul focus:outline-none focus:ring-1 focus:ring-marca-azul';
+  'w-full rounded-md border border-fundo-borda bg-fundo-eleva px-4 py-3 text-sm text-tinta-forte caret-marca-neon placeholder-gray-500 transition focus:border-marca-azul focus:outline-none focus:ring-1 focus:ring-marca-azul';
 
 export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
   const [tela, setTela] = useState<Tela>('entrar');
@@ -186,7 +182,7 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
   };
 
   return (
-    <div className="flex min-h-screen bg-[#1c1c1e]">
+    <div className="flex min-h-screen bg-white">
       {/* ==================== COLUNA ESQUERDA: FORMULÁRIO ==================== */}
       <div className="flex w-full flex-col items-center justify-center px-6 py-12 lg:w-[35%] lg:min-w-[480px]">
         <div className="w-full max-w-[420px]">
@@ -196,10 +192,10 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
 
           <div className="mb-8 text-center">
             <div className="mb-1 flex items-center justify-center gap-2">
-              <span className="h-4 w-4 rounded-full bg-gradient-to-br from-blue-400 to-blue-600" />
-              <span className="text-lg font-semibold text-white">Contabilidade.net</span>
+              <span className="h-4 w-4 rounded-full bg-marca-azul" />
+              <span className="text-lg font-semibold text-tinta-forte">RTE</span>
             </div>
-            <p className="text-sm text-gray-300">
+            <p className="text-sm text-tinta-media">
               {tela === 'criar'
                 ? primeiroAcesso
                   ? 'Crie a primeira conta de acesso'
@@ -220,7 +216,7 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
             )}
 
             {aviso && (
-              <div className="mb-5 flex gap-2 rounded-md border border-marca-azul/30 bg-marca-azul/10 px-4 py-3 text-sm text-blue-200">
+              <div className="mb-5 flex gap-2 rounded-md border border-marca-azul/30 bg-marca-azul/10 px-4 py-3 text-sm text-marca-azul">
                 <CheckCircle size={16} className="mt-0.5 shrink-0" />
                 <span className="leading-snug">{aviso}</span>
               </div>
@@ -268,14 +264,14 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
                     <button
                       type="button"
                       onClick={() => setVerSenha(v => !v)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 transition hover:text-gray-700"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-tinta-fraca transition hover:text-gray-700"
                       aria-label={verSenha ? 'Ocultar senha' : 'Mostrar senha'}
                     >
                       {verSenha ? <Eye size={18} /> : <EyeOff size={18} />}
                     </button>
                   </div>
                   {tela === 'criar' && (
-                    <p className="mt-1.5 text-xs text-gray-500">Mínimo de 8 caracteres.</p>
+                    <p className="mt-1.5 text-xs text-tinta-suave">Mínimo de 8 caracteres.</p>
                   )}
                 </Campo>
               )}
@@ -305,12 +301,12 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
                       <button
                         type="button"
                         onClick={() => setVerSenha(v => !v)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 transition hover:text-gray-700"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-tinta-fraca transition hover:text-gray-700"
                       >
                         {verSenha ? <Eye size={18} /> : <EyeOff size={18} />}
                       </button>
                     </div>
-                    <p className="mt-1.5 text-xs text-gray-500">Mínimo de 8 caracteres.</p>
+                    <p className="mt-1.5 text-xs text-tinta-suave">Mínimo de 8 caracteres.</p>
                   </Campo>
                 </>
               )}
@@ -334,7 +330,7 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
             </form>
 
             {demorando && carregando && (
-              <p className="mt-3 text-center text-xs leading-snug text-gray-500">
+              <p className="mt-3 text-center text-xs leading-snug text-tinta-suave">
                 O servidor pode estar iniciando após período ocioso. A primeira
                 requisição costuma levar até 30 segundos.
               </p>
@@ -348,12 +344,12 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
                       limparMensagens();
                       setTela('esqueci');
                     }}
-                    className="text-gray-400 transition hover:text-gray-200 hover:underline"
+                    className="text-tinta-fraca transition hover:text-tinta-media hover:underline"
                   >
                     Esqueci a senha
                   </button>
                   {!primeiroAcesso && (
-                    <p className="mt-3 text-gray-500">
+                    <p className="mt-3 text-tinta-suave">
                       Não tem acesso?{' '}
                       <button
                         onClick={() => {
@@ -375,7 +371,7 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
                     limparMensagens();
                     setTela('entrar');
                   }}
-                  className="inline-flex items-center gap-1.5 text-gray-400 transition hover:text-gray-200 hover:underline"
+                  className="inline-flex items-center gap-1.5 text-tinta-fraca transition hover:text-tinta-media hover:underline"
                 >
                   <ArrowLeft size={14} />
                   Voltar para o login
@@ -384,49 +380,33 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
             </div>
           </div>
 
-          <p className="mt-8 text-center text-xs text-gray-500">
+          <p className="mt-8 text-center text-xs text-tinta-suave">
             Validador da Reforma Tributária do Consumo — NF-e / NFC-e
           </p>
         </div>
       </div>
 
-      {/* ==================== COLUNA DIREITA: IMAGEM ==================== */}
+      {/* ==================== COLUNA DIREITA: MARCA ==================== */}
       {/*
-        Para usar a arte oficial, coloque o arquivo em frontend/public/login-hero.jpg.
-        Enquanto ele não existir, o gradiente abaixo aparece no lugar — assim a tela
-        nunca fica com a área quebrada por imagem ausente.
+        Faixa roxa chapada do RTE. Se a arte oficial for usada um dia, coloque o
+        arquivo em frontend/public/login-hero.jpg — ele entra como fundo e o
+        roxo continua atrás, para a tela nunca quebrar por imagem ausente.
       */}
       <div
-        className="relative hidden flex-1 overflow-hidden bg-[#0a1929] bg-cover bg-center lg:block"
+        className="relative hidden flex-1 overflow-hidden bg-marca-azul bg-cover bg-center lg:block"
         style={{ backgroundImage: "url('/login-hero.jpg')" }}
       >
-        <div className="absolute inset-0 bg-gradient-to-br from-[#0a1929] via-[#0d2847] to-[#061320]" />
-
-        {/* Faixas de luz, no espírito da arte de referência */}
-        <div className="absolute inset-0 opacity-70">
-          <div className="absolute left-0 top-[12%] h-[2px] w-full bg-gradient-to-r from-transparent via-blue-400 to-transparent blur-[1px]" />
-          <div className="absolute left-0 top-[14%] h-[60px] w-full bg-gradient-to-b from-blue-500/25 to-transparent blur-2xl" />
-          <div className="absolute bottom-[28%] left-[8%] h-[1px] w-[45%] bg-gradient-to-r from-transparent via-cyan-300/70 to-transparent" />
-          <div className="absolute bottom-[20%] right-[10%] h-[1px] w-[35%] bg-gradient-to-r from-transparent via-blue-300/60 to-transparent" />
-          <div className="absolute -left-24 top-1/3 h-[420px] w-[420px] rounded-full bg-blue-500/20 blur-[120px]" />
-          <div className="absolute -right-20 bottom-1/4 h-[380px] w-[380px] rounded-full bg-cyan-400/15 blur-[110px]" />
-        </div>
-
-        {/* Painel com a marca, como o monitor da arte de referência */}
-        <div className="absolute right-[8%] top-[22%] w-[52%] rounded-lg border border-blue-400/30 bg-gradient-to-br from-blue-900/40 to-blue-950/60 p-8 shadow-[0_0_60px_rgba(59,130,246,0.25)] backdrop-blur-sm">
-          <div className="text-center">
-            <span className="text-3xl font-bold tracking-tight">
-              <span className="text-white">Contabilidade</span>
-              <span className="text-blue-400">.net</span>
-            </span>
-            <p className="mt-3 text-sm text-blue-200/70">
+        <div className="absolute inset-0 flex flex-col justify-center px-[8%]">
+          <div className="rounded-xl border border-white/30 bg-fundo-borda p-10 text-center">
+            <MarcaRTE tamanho={34} invertida />
+            <p className="mt-3 text-sm text-white/85">
               Inteligência tributária para a reforma
             </p>
           </div>
         </div>
 
         <div className="absolute bottom-12 left-12 right-12">
-          <p className="text-sm leading-relaxed text-blue-100/50">
+          <p className="text-sm leading-relaxed text-white/75">
             Análise de NF-e, apuração de divergências e simulação da transição
             tributária de 2027 a 2033.
           </p>
