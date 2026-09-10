@@ -192,7 +192,11 @@ export class NFEParserService {
 
       return documento;
     } catch (error: any) {
-      throw new Error(`Erro ao processar NF-e: ${error.message}`);
+      // As validações acima já produzem mensagens em português explicando o
+      // que houve. Prefixar tudo com "Erro ao processar NF-e" só empurrava a
+      // informação útil para o fim da linha na lista de arquivos recusados.
+      if (error instanceof Error) throw error;
+      throw new Error(`Não foi possível ler o arquivo: ${error?.message ?? error}`);
     }
   }
 
