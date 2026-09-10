@@ -125,7 +125,12 @@ function extractToken(req: Request): string | null {
 /**
  * Gerar JWT token
  */
-export function generateToken(userId: string, email: string, sessionId?: string): string {
+export function generateToken(
+  userId: string,
+  email: string,
+  sessionId?: string,
+  extras?: { papel?: 'administrador' | 'usuario'; assumidoPor?: { userId: string; email: string } }
+): string {
   const options: SignOptions = {
     expiresIn: config.jwt.expiry as SignOptions['expiresIn'],
     algorithm: 'HS256',
@@ -136,10 +141,34 @@ export function generateToken(userId: string, email: string, sessionId?: string)
       userId,
       email,
       sessionId,
+      ...(extras?.papel ? { papel: extras.papel } : {}),
+      ...(extras?.assumidoPor ? { assumidoPor: extras.assumidoPor } : {}),
     },
     config.jwt.secret,
     options
   );
+}
+
+/**
+ * Restringe a rota a administradores.
+ *
+ * O papel é conferido no cadastro, e não no token: assim, rebaixar alguém
+ * tem efeito imediato, sem esperar o token expirar. Um administrador que
+ * assumiu outra conta perde o acesso administrativo enquanto estiver nela —
+ * é a conta assumida que responde pela permissão.
+ */
+export async function apenasAdministrador(req: Request, res: Response, next: NextFunction) {
+  const { usuarioService } = await import('../services/usuarios');
+
+  if (!req.user?.userId || !(await usuarioService.ehAdministrador(req.user.userId))) {
+    return res.status(403).json({
+      success: false,
+      error: 'Esta área é restrita a administradores.',
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  next();
 }
 
 /**

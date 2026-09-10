@@ -7,6 +7,7 @@ import { config, validateConfig } from './config';
 
 // Importar rotas
 import authRouter from './routes/auth';
+import adminRouter from './routes/admin';
 import uploadRouter from './routes/upload';
 import dashboardRouter from './routes/dashboard';
 import exportRouter from './routes/export';
@@ -100,6 +101,7 @@ app.get('/health', (req, res) => {
 
 // API v1
 app.use('/api/v1/auth', authRouter);
+app.use('/api/v1/admin', adminRouter);
 app.use('/api/v1/upload', uploadRouter);
 app.use('/api/v1/dashboard', dashboardRouter);
 app.use('/api/v1/export', exportRouter);

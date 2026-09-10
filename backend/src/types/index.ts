@@ -8,6 +8,14 @@ export interface JWTPayload {
   email: string;
   /** Sessão vinculada ao token, para que upload e dashboard leiam o mesmo estado */
   sessionId?: string;
+  /** Papel do usuário no sistema */
+  papel?: 'administrador' | 'usuario';
+  /**
+   * Preenchido quando um administrador assumiu esta conta. Guarda quem
+   * assumiu, para que a ação fique rastreável e a interface possa avisar
+   * que a sessão não é do dono da conta.
+   */
+  assumidoPor?: { userId: string; email: string };
   iat: number;
   exp: number;
 }
@@ -26,7 +34,10 @@ export interface AuthResponse {
     userId: string;
     email: string;
     nome?: string;
+    papel?: 'administrador' | 'usuario';
   };
+  /** Presente apenas em sessão assumida por um administrador */
+  assumidoPor?: { userId: string; email: string };
   expiresIn: string;
 }
 

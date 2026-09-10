@@ -3,11 +3,15 @@ import bcrypt from 'bcryptjs';
 import { config } from '../config';
 import { ArmazenamentoUsuarios, criarArmazenamento } from './armazenamentoUsuarios';
 
+/** Papel do usuário. Só o administrador enxerga a aba de administração. */
+export type PapelUsuario = 'administrador' | 'usuario';
+
 export interface Usuario {
   id: string;
   email: string;
   nome: string;
   senhaHash: string;
+  papel: PapelUsuario;
   criadoEm: string;
   ultimoAcesso: string | null;
   ativo: boolean;
@@ -44,11 +48,46 @@ export class UsuarioService {
     try {
       const conteudo = await this.armazenamento.ler();
       if (!conteudo) return { usuarios: [] };
-      return JSON.parse(conteudo);
+      return this.migrarPapeis(JSON.parse(conteudo));
     } catch (erro: any) {
       console.error(`Erro ao ler usuários: ${erro.message}`);
       throw new Error('Não foi possível acessar o cadastro de usuários.');
     }
+  }
+
+  /**
+   * Preenche o papel em cadastros criados antes de a coluna existir.
+   *
+   * Sem isto, uma instalação anterior ficaria com todo mundo como usuário
+   * comum e ninguém conseguiria abrir a administração para promover alguém.
+   * A conta mais antiga vira administradora — é a que criou a instalação.
+   */
+  private migrarPapeis(base: BaseUsuarios): BaseUsuarios {
+    if (!base.usuarios?.length) return base;
+
+    let mexeu = false;
+    for (const u of base.usuarios) {
+      if (!u.papel) {
+        u.papel = 'usuario';
+        mexeu = true;
+      }
+    }
+
+    if (!base.usuarios.some(u => u.papel === 'administrador')) {
+      const maisAntigo = [...base.usuarios].sort((a, b) =>
+        (a.criadoEm || '').localeCompare(b.criadoEm || '')
+      )[0];
+      maisAntigo.papel = 'administrador';
+      mexeu = true;
+      console.log(`[usuarios] ${maisAntigo.email} promovido a administrador na migração.`);
+    }
+
+    if (mexeu) {
+      // Grava sem esperar: a leitura já devolve o estado corrigido.
+      void this.armazenamento.gravar(JSON.stringify(base, null, 2));
+    }
+
+    return base;
   }
 
   private async gravar(base: BaseUsuarios): Promise<void> {
@@ -65,8 +104,13 @@ export class UsuarioService {
       userId: u.id,
       email: u.email,
       nome: u.nome,
+      // Cadastros criados antes da introdução de papéis não têm o campo.
+      // Tratá-los como usuário comum é o padrão seguro: quem precisar de
+      // administrador é promovido explicitamente.
+      papel: u.papel ?? 'usuario',
       criadoEm: u.criadoEm,
       ultimoAcesso: u.ultimoAcesso,
+      ativo: u.ativo,
     };
   }
 
@@ -104,6 +148,10 @@ export class UsuarioService {
       email: alvo,
       nome: nome?.trim() || alvo.split('@')[0],
       senhaHash: await bcrypt.hash(senha, CUSTO_HASH),
+      // A primeira conta da instalação é administradora: sem isso ninguém
+      // conseguiria promover ninguém e a aba de administração ficaria
+      // inacessível para sempre.
+      papel: base.usuarios.length === 0 ? 'administrador' : 'usuario',
       criadoEm: new Date().toISOString(),
       ultimoAcesso: null,
       ativo: true,
@@ -213,6 +261,97 @@ export class UsuarioService {
     await this.gravar(base);
 
     return this.publico(registro);
+  }
+
+  // ==================== ADMINISTRAÇÃO ====================
+
+  async buscarPorId(id: string): Promise<Usuario | null> {
+    const base = await this.ler();
+    return base.usuarios.find(u => u.id === id) || null;
+  }
+
+  async ehAdministrador(id: string): Promise<boolean> {
+    const u = await this.buscarPorId(id);
+    return (u?.papel ?? 'usuario') === 'administrador';
+  }
+
+  /** Lista para a tela de administração. Nunca devolve hash de senha. */
+  async listar() {
+    const base = await this.ler();
+    return base.usuarios
+      .map(u => this.publico(u))
+      .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+  }
+
+  /**
+   * Atualiza um usuário a partir da tela de administração.
+   *
+   * A senha é opcional: quando vem em branco, o hash atual é preservado.
+   * Diferente de alterarSenha, aqui não se exige a senha antiga — é a
+   * operação de reset feita por quem administra, e o motivo de ela viver
+   * atrás de uma verificação de papel.
+   */
+  async atualizarComoAdmin(
+    id: string,
+    dados: { nome?: string; email?: string; papel?: PapelUsuario; senha?: string }
+  ) {
+    const base = await this.ler();
+    const registro = base.usuarios.find(u => u.id === id);
+    if (!registro) throw new Error('Usuário não encontrado.');
+
+    if (dados.email !== undefined) {
+      const alvo = this.normalizar(dados.email);
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(alvo)) {
+        throw new Error('E-mail inválido.');
+      }
+      if (base.usuarios.some(u => u.email === alvo && u.id !== id)) {
+        throw new Error('Já existe uma conta com este e-mail.');
+      }
+      registro.email = alvo;
+    }
+
+    if (dados.nome !== undefined && dados.nome.trim()) {
+      registro.nome = dados.nome.trim();
+    }
+
+    if (dados.papel !== undefined) {
+      // Impede que a instalação fique sem nenhum administrador.
+      const admins = base.usuarios.filter(u => (u.papel ?? 'usuario') === 'administrador');
+      const ehUltimoAdmin =
+        admins.length === 1 && admins[0].id === id && dados.papel !== 'administrador';
+      if (ehUltimoAdmin) {
+        throw new Error('Este é o único administrador. Promova outro antes de rebaixá-lo.');
+      }
+      registro.papel = dados.papel;
+    }
+
+    if (dados.senha) {
+      if (dados.senha.length < 8) {
+        throw new Error('A senha deve ter ao menos 8 caracteres.');
+      }
+      registro.senhaHash = await bcrypt.hash(dados.senha, CUSTO_HASH);
+      // Qualquer pedido de recuperação pendente perde a validade.
+      registro.tokenRecuperacao = null;
+      registro.tokenExpiraEm = null;
+    }
+
+    await this.gravar(base);
+    return this.publico(registro);
+  }
+
+  async excluir(id: string) {
+    const base = await this.ler();
+    const registro = base.usuarios.find(u => u.id === id);
+    if (!registro) throw new Error('Usuário não encontrado.');
+
+    const admins = base.usuarios.filter(u => (u.papel ?? 'usuario') === 'administrador');
+    if ((registro.papel ?? 'usuario') === 'administrador' && admins.length === 1) {
+      throw new Error('Não é possível excluir o único administrador.');
+    }
+
+    base.usuarios = base.usuarios.filter(u => u.id !== id);
+    await this.gravar(base);
+    return { removido: registro.email };
   }
 }
 

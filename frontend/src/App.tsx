@@ -6,13 +6,14 @@ import {
 } from 'recharts';
 import {
   Upload, Download, LogOut, FileText, TrendingUp, AlertTriangle,
-  CheckCircle, XCircle, Calendar, Building2, DollarSign, Settings
+  CheckCircle, XCircle, Calendar, Building2, DollarSign, Settings, Shield
 } from 'lucide-react';
 
 import { MarcaRTE } from './components/Marca';
 import { Tooltip as DicaHover, AjudaIcone, MemoriaCalculo } from './components/Tooltip';
 import { AbaDivergencias } from './components/AbaDivergencias';
 import { AbaReforma } from './components/AbaReforma';
+import { AbaAdministracao } from './components/AbaAdministracao';
 import { TelaLogin } from './components/TelaLogin';
 import { PainelExecutivo } from './components/PainelExecutivo';
 import { API_URL } from './utils/api';
@@ -164,10 +165,25 @@ const Header: React.FC<{ user: any; onLogout: () => void }> = ({ user, onLogout 
         </div>
 
         <div className="flex items-center gap-4">
+          {/*
+            Em sessão assumida, o cabeçalho precisa deixar isso explícito:
+            sem o aviso, o administrador pode achar que está na própria conta
+            e importar notas no lugar de outra pessoa.
+          */}
+          {user?.assumidoPor && (
+            <span className="hidden items-center gap-1.5 rounded-lg border border-amber-400 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 md:flex">
+              <Shield size={13} />
+              Sessão assumida por {user.assumidoPor.email}
+            </span>
+          )}
+
           <div className="hidden text-right sm:block">
             <p className="text-xs text-tinta-suave">Logado como</p>
             <p className="text-sm font-semibold text-tinta-media">
               {user?.nome || user?.email}
+              {user?.papel === 'administrador' && (
+                <span className="ml-1.5 text-xs font-normal text-marca-azul">admin</span>
+              )}
             </p>
           </div>
 
@@ -435,6 +451,8 @@ const DashboardContent: React.FC<{
   sessionId: string;
   token: string;
   onRefresh: () => Promise<void>;
+  usuario: any;
+  onAssumirUsuario: (dados: any) => void;
 }> = ({
   resumo,
   divergencias,
@@ -445,6 +463,8 @@ const DashboardContent: React.FC<{
   sessionId,
   token,
   onRefresh,
+  usuario,
+  onAssumirUsuario,
 }) => {
   const [activeTab, setActiveTab] = useState('painel');
 
@@ -629,6 +649,12 @@ const DashboardContent: React.FC<{
             { id: 'regimes', label: '🏢 Regimes' },
             { id: 'transicao', label: '📈 Transição' },
             { id: 'reforma', label: '🏛️ Reforma 2027-2033' },
+            // A aba só existe para administradores. O backend confere o papel
+            // de novo em cada rota, então esconder aqui é conveniência, não
+            // a proteção em si.
+            ...(usuario?.papel === 'administrador'
+              ? [{ id: 'admin', label: '🛡️ Administração' }]
+              : []),
           ].map(tab => (
             <button
               key={tab.id}
@@ -1027,6 +1053,15 @@ const DashboardContent: React.FC<{
             </ResponsiveContainer>
           </Card>
         )}
+        {activeTab === 'admin' && usuario?.papel === 'administrador' && (
+          <AbaAdministracao
+            token={token}
+            sessionId={sessionId}
+            usuarioAtualId={usuario.userId}
+            onAssumirUsuario={onAssumirUsuario}
+          />
+        )}
+
         {activeTab === 'reforma' && (
           <AbaReforma sessionId={sessionId} token={token} />
         )}
@@ -1064,6 +1099,27 @@ const App: React.FC = () => {
   const [transicao, setTransicao] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [appError, setAppError] = useState<string | null>(null);
+
+  /**
+   * Troca a sessão pela de outro usuário, a pedido do administrador.
+   *
+   * O token do administrador é descartado do navegador de propósito: manter
+   * os dois ao mesmo tempo abriria caminho para agir como um enquanto se
+   * navega como outro. Para voltar, ele faz logout e entra de novo.
+   */
+  const assumirUsuario = (dados: {
+    token: string;
+    sessionId: string;
+    user: any;
+    assumidoPor: { userId: string; email: string };
+  }) => {
+    setToken(dados.token);
+    setSessionId(dados.sessionId);
+    setUser({ ...dados.user, assumidoPor: dados.assumidoPor });
+    setAppError(null);
+    // Recarrega para que todas as abas leiam os documentos da conta assumida.
+    window.location.reload();
+  };
 
   useEffect(() => {
     if (state.sessionId) {
@@ -1180,6 +1236,8 @@ const App: React.FC = () => {
             sessionId={state.sessionId!}
             token={state.token}
             onRefresh={refreshDashboard}
+            usuario={state.user}
+            onAssumirUsuario={assumirUsuario}
           />
         </div>
       </main>

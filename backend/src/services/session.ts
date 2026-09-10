@@ -39,6 +39,22 @@ export class SessionService {
   }
 
   /**
+   * Sessão mais recente de um usuário que já tenha documentos importados.
+   *
+   * Usado quando um administrador assume a conta: criar uma sessão nova
+   * entregaria um painel vazio, e o objetivo de assumir é justamente ver as
+   * análises daquela pessoa. Sem documentos em nenhuma sessão dele, devolve
+   * null e o chamador cria uma sessão limpa.
+   */
+  sessaoComDocumentosDoUsuario(userId: string): UserSession | null {
+    const candidatas = Array.from(this.sessions.values())
+      .filter(s => s.userId === userId && s.documentos.length > 0)
+      .sort((a, b) => b.ultimaAtualizacao.localeCompare(a.ultimaAtualizacao));
+
+    return candidatas[0] ?? null;
+  }
+
+  /**
    * Adiciona documentos à sessão e regenera dashboard
    */
   async adicionarDocumentos(

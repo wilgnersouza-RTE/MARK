@@ -37,7 +37,9 @@ router.post('/login', async (req: Request, res: Response) => {
     const sessionId = `sess-${usuario.userId}-${uuidv4().slice(0, 8)}`;
     sessionService.criarOuRecuperarSessao(sessionId, usuario.userId, usuario.email);
 
-    const token = generateToken(usuario.userId, usuario.email, sessionId);
+    const token = generateToken(usuario.userId, usuario.email, sessionId, {
+      papel: usuario.papel,
+    });
 
     const response: AuthResponse = {
       token,
@@ -46,6 +48,7 @@ router.post('/login', async (req: Request, res: Response) => {
         userId: usuario.userId,
         email: usuario.email,
         nome: usuario.nome,
+        papel: usuario.papel,
       },
       expiresIn: config.jwt.expiry,
     };
@@ -87,7 +90,9 @@ router.post('/register', async (req: Request, res: Response) => {
     const sessionId = `sess-${usuario.userId}-${uuidv4().slice(0, 8)}`;
     sessionService.criarOuRecuperarSessao(sessionId, usuario.userId, usuario.email);
 
-    const token = generateToken(usuario.userId, usuario.email, sessionId);
+    const token = generateToken(usuario.userId, usuario.email, sessionId, {
+      papel: usuario.papel,
+    });
 
     const response: AuthResponse = {
       token,
@@ -96,6 +101,7 @@ router.post('/register', async (req: Request, res: Response) => {
         userId: usuario.userId,
         email: usuario.email,
         nome: usuario.nome,
+        papel: usuario.papel,
       },
       expiresIn: config.jwt.expiry,
     };
