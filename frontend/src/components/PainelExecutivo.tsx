@@ -62,7 +62,7 @@ const Chip: React.FC<{
     className={`whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium transition ${
       ativo
         ? 'bg-marca-azul text-white shadow-neon'
-        : 'bg-fundo-eleva text-gray-400 ring-1 ring-fundo-borda hover:text-gray-200'
+        : 'bg-fundo-eleva text-tinta-fraca ring-1 ring-fundo-borda hover:text-tinta-media'
     }`}
   >
     {children}
@@ -84,13 +84,13 @@ const CartaoKPI: React.FC<{
     }`}
   >
     <div className="mb-1 flex items-center gap-1.5">
-      <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+      <span className="text-[11px] font-semibold uppercase tracking-wider text-tinta-suave">
         {rotulo}
       </span>
       {memoria && <AjudaIcone tamanho={12} largura={320} conteudo={memoria} />}
     </div>
 
-    <p className={`font-bold text-white ${destaque ? 'text-3xl' : 'text-xl'}`}>{valor}</p>
+    <p className={`font-bold text-tinta-forte ${destaque ? 'text-3xl' : 'text-xl'}`}>{valor}</p>
 
     <div className="mt-2 flex items-end justify-between gap-3">
       {variacao !== undefined && variacao !== null ? (
@@ -101,7 +101,7 @@ const CartaoKPI: React.FC<{
         >
           {variacao >= 0 ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
           {formatarPercentual(Math.abs(variacao), 1)}
-          <span className="text-gray-500">vs. período anterior</span>
+          <span className="text-tinta-suave">vs. período anterior</span>
         </span>
       ) : (
         <span />
@@ -114,7 +114,7 @@ const CartaoKPI: React.FC<{
               <Area
                 type="monotone"
                 dataKey="v"
-                stroke="#4f8cff"
+                stroke="#7F2BF5"
                 strokeWidth={1.5}
                 fill="rgba(79,140,255,0.15)"
               />
@@ -143,22 +143,33 @@ const Alerta: React.FC<{ titulo: string; detalhe: string; cor: 'vermelho' | 'amb
       className={`mt-0.5 shrink-0 ${cor === 'vermelho' ? 'text-red-400' : 'text-amber-400'}`}
     />
     <div className="min-w-0">
-      <p className="text-xs font-semibold leading-snug text-gray-100">{titulo}</p>
-      <p className="mt-0.5 text-[11px] leading-snug text-gray-400">{detalhe}</p>
+      <p className="text-xs font-semibold leading-snug text-tinta-forte">{titulo}</p>
+      <p className="mt-0.5 text-[11px] leading-snug text-tinta-fraca">{detalhe}</p>
     </div>
   </div>
 );
 
+/**
+ * Todo painel aceita uma memória de cálculo. A regra adotada no sistema é
+ * simples: se o número exibido é resultado de uma conta, o usuário precisa
+ * conseguir ver a conta sem sair da tela.
+ */
 const Painel: React.FC<{
   titulo: string;
   subtitulo?: string;
+  memoria?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
-}> = ({ titulo, subtitulo, children, className = '' }) => (
+}> = ({ titulo, subtitulo, memoria, children, className = '' }) => (
   <div className={`rounded-lg border border-fundo-borda bg-fundo-card p-4 ${className}`}>
     <div className="mb-3 flex items-baseline gap-2">
-      <h3 className="text-sm font-semibold text-gray-100">{titulo}</h3>
-      {subtitulo && <span className="text-[11px] text-gray-500">{subtitulo}</span>}
+      <h3 className="text-sm font-semibold text-tinta-forte">{titulo}</h3>
+      {memoria && (
+        <span className="translate-y-0.5">
+          <AjudaIcone largura={330} tamanho={14} conteudo={memoria} />
+        </span>
+      )}
+      {subtitulo && <span className="text-[11px] text-tinta-suave">{subtitulo}</span>}
     </div>
     {children}
   </div>
@@ -427,7 +438,7 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
 
   if (carregando) {
     return (
-      <div className="flex items-center justify-center gap-2 py-20 text-gray-400">
+      <div className="flex items-center justify-center gap-2 py-20 text-tinta-fraca">
         <Loader2 size={18} className="animate-spin" />
         Carregando painel...
       </div>
@@ -436,7 +447,7 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
 
   if (documentos.length === 0) {
     return (
-      <div className="rounded-lg border border-fundo-borda bg-fundo-card py-20 text-center text-gray-400">
+      <div className="rounded-lg border border-fundo-borda bg-fundo-card py-20 text-center text-tinta-fraca">
         Importe um arquivo ZIP com XMLs para ver o painel.
       </div>
     );
@@ -453,8 +464,8 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
           NF
         </span>
         <div>
-          <p className="text-sm font-semibold text-white">Painel Fiscal</p>
-          <p className="text-[11px] text-gray-500">
+          <p className="text-sm font-semibold text-tinta-forte">Painel Fiscal</p>
+          <p className="text-[11px] text-tinta-suave">
             NF-e importadas · {dados.periodo}
           </p>
         </div>
@@ -462,7 +473,7 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
 
       {/* ==================== FILTROS ==================== */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-fundo-borda bg-fundo-card px-4 py-3">
-        <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
           Regime
         </span>
         {regimes.map(r => (
@@ -475,7 +486,7 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
           </Chip>
         ))}
 
-        <span className="ml-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+        <span className="ml-2 text-[10px] font-bold uppercase tracking-wider text-tinta-suave">
           Tipo
         </span>
         {['entrada', 'saida'].map(t => (
@@ -563,11 +574,11 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
       <Painel titulo="Evolução mensal" subtitulo="valor das notas e tributos destacados">
         <ResponsiveContainer width="100%" height={240}>
           <LineChart data={dados.serieMensal} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#2a2a3a" />
-            <XAxis dataKey="mes" stroke="#9ca3af" fontSize={11} tickLine={false} />
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E3DC" />
+            <XAxis dataKey="mes" stroke="#888780" fontSize={11} tickLine={false} />
             <YAxis
               tickFormatter={formatarMoedaCompacta}
-              stroke="#9ca3af"
+              stroke="#888780"
               fontSize={11}
               tickLine={false}
               axisLine={false}
@@ -576,14 +587,14 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
               contentStyle={{
                 borderRadius: 8,
                 border: '1px solid #2a2a3a',
-                backgroundColor: '#13131c',
-                color: '#e5e7eb',
+                backgroundColor: '#FFFFFF',
+                color: '#3D3D3A',
                 fontSize: 12,
               }}
               formatter={(v: any, n: any) => [formatarMoeda(v), n === 'valor' ? 'Valor' : 'Tributos']}
             />
-            <Line type="monotone" dataKey="valor" stroke="#4f8cff" strokeWidth={2} dot={false} name="valor" />
-            <Line type="monotone" dataKey="tributos" stroke="#22d3ee" strokeWidth={1.5} dot={false} name="tributos" />
+            <Line type="monotone" dataKey="valor" stroke="#7F2BF5" strokeWidth={2} dot={false} name="valor" />
+            <Line type="monotone" dataKey="tributos" stroke="#1D9E75" strokeWidth={1.5} dot={false} name="tributos" />
           </LineChart>
         </ResponsiveContainer>
       </Painel>
@@ -593,14 +604,25 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
         <Painel
           titulo="Variação por tributo e ano"
           subtitulo="% contra o primeiro ano da transição"
+          memoria={
+            <MemoriaCalculo
+              titulo="Variação por tributo e ano"
+              descricao="Cada célula compara o tributo daquele ano com o mesmo tributo no primeiro ano da transição."
+              linhas={[
+                { rotulo: 'Fórmula', valor: '(ano − base) ÷ base' },
+                { rotulo: 'Base', valor: 'primeiro ano da série' },
+              ]}
+              origem="Verde indica recuo do tributo; vermelho, avanço."
+            />
+          }
         >
           <div className="overflow-x-auto">
             <table className="w-full border-separate border-spacing-[2px] text-[11px]">
               <thead>
                 <tr>
-                  <th className="w-24 text-left font-medium text-gray-500" />
+                  <th className="w-24 text-left font-medium text-tinta-suave" />
                   {heatmap.anos.map(a => (
-                    <th key={a} className="pb-1 text-center font-medium text-gray-500">
+                    <th key={a} className="pb-1 text-center font-medium text-tinta-suave">
                       {a}
                     </th>
                   ))}
@@ -609,11 +631,11 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
               <tbody>
                 {heatmap.linhas.map(linha => (
                   <tr key={linha.nome}>
-                    <td className="pr-2 text-left font-medium text-gray-300">{linha.nome}</td>
+                    <td className="pr-2 text-left font-medium text-tinta-media">{linha.nome}</td>
                     {linha.valores.map(c => (
                       <td
                         key={c.ano}
-                        className="rounded px-1 py-1.5 text-center font-medium text-white"
+                        className="rounded px-1 py-1.5 text-center font-medium text-tinta-forte"
                         style={{ backgroundColor: corHeatmap(c.variacao, heatmap.maximo) }}
                         title={`${linha.nome} em ${c.ano}: ${formatarMoeda(c.valor)}`}
                       >
@@ -626,7 +648,7 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
               </tbody>
             </table>
           </div>
-          <p className="mt-2 text-[10px] text-gray-500">
+          <p className="mt-2 text-[10px] text-tinta-suave">
             Azul indica avanço do tributo; rosa indica recuo. Passe o mouse para ver o valor.
           </p>
         </Painel>
@@ -634,12 +656,26 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
 
       {/* ==================== BARRAS ==================== */}
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <Painel titulo="Participação por tributo" subtitulo="sobre o total destacado">
+        <Painel
+          titulo="Participação por tributo"
+          subtitulo="sobre o total destacado"
+          memoria={
+            <MemoriaCalculo
+              titulo="Participação por tributo"
+              descricao="Quanto cada tributo representa dentro da carga total destacada nas notas filtradas."
+              linhas={[
+                { rotulo: 'Fórmula', valor: 'tributo ÷ total destacado' },
+                { rotulo: 'Total destacado', valor: formatarMoeda(dados.tributos) },
+              ]}
+              origem="Considera ICMS, ICMS-ST, IPI, ISS, PIS, COFINS e IRRF."
+            />
+          }
+        >
           <div className="space-y-2">
             {dados.tributosLista.map(t => (
               <div key={t.nome} className="flex items-center gap-3">
-                <span className="w-16 shrink-0 text-[11px] text-gray-400">{t.nome}</span>
-                <div className="h-5 flex-1 overflow-hidden rounded bg-white/5">
+                <span className="w-16 shrink-0 text-[11px] text-tinta-fraca">{t.nome}</span>
+                <div className="h-5 flex-1 overflow-hidden rounded bg-fundo-eleva">
                   <div
                     className="flex h-5 items-center justify-end rounded bg-gradient-to-r from-marca-azul to-marca-ciano px-2"
                     style={{ width: `${Math.max(6, (t.valor / maiorTributo) * 100)}%` }}
@@ -652,7 +688,7 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
                     </span>
                   </div>
                 </div>
-                <span className="w-24 shrink-0 text-right font-mono text-[11px] text-gray-300">
+                <span className="w-24 shrink-0 text-right font-mono text-[11px] text-tinta-media">
                   {formatarMoedaCompacta(t.valor)}
                 </span>
               </div>
@@ -660,20 +696,34 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
           </div>
         </Painel>
 
-        <Painel titulo="Fornecedores por valor" subtitulo="10 maiores no período">
+        <Painel
+          titulo="Fornecedores por valor"
+          subtitulo="10 maiores no período"
+          memoria={
+            <MemoriaCalculo
+              titulo="Fornecedores por valor"
+              descricao="Notas agrupadas por CNPJ do emitente e ordenadas pelo valor somado."
+              linhas={[
+                { rotulo: 'Chave do agrupamento', valor: 'CNPJ do emitente' },
+                { rotulo: 'Ordenação', valor: 'maior valor primeiro' },
+              ]}
+              origem="Mostra apenas os dez primeiros; os demais entram no total geral."
+            />
+          }
+        >
           <div className="space-y-2">
             {dados.fornecedores.slice(0, 10).map(f => (
               <div key={f.cnpj} className="flex items-center gap-3">
-                <span className="w-36 shrink-0 truncate text-[11px] text-gray-400" title={f.nome}>
+                <span className="w-36 shrink-0 truncate text-[11px] text-tinta-fraca" title={f.nome}>
                   {f.nome}
                 </span>
-                <div className="h-5 flex-1 overflow-hidden rounded bg-white/5">
+                <div className="h-5 flex-1 overflow-hidden rounded bg-fundo-eleva">
                   <div
                     className="h-5 rounded bg-marca-azul/70"
                     style={{ width: `${Math.max(4, (f.valor / maiorFornecedor) * 100)}%` }}
                   />
                 </div>
-                <span className="w-24 shrink-0 text-right font-mono text-[11px] text-gray-300">
+                <span className="w-24 shrink-0 text-right font-mono text-[11px] text-tinta-media">
                   {formatarMoedaCompacta(f.valor)}
                 </span>
               </div>
@@ -684,11 +734,25 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
 
       {/* ==================== TABELAS ==================== */}
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <Painel titulo="Fornecedores com divergência" subtitulo="ordenados por ocorrências">
+        <Painel
+          titulo="Fornecedores com divergência"
+          subtitulo="ordenados por ocorrências"
+          memoria={
+            <MemoriaCalculo
+              titulo="Fornecedores com divergência"
+              descricao="Contagem de divergências apuradas nas notas de cada fornecedor."
+              linhas={[
+                { rotulo: 'Ocorrência', valor: 'uma por tributo e ano' },
+                { rotulo: 'Ordenação', valor: 'mais ocorrências primeiro' },
+              ]}
+              origem="A mesma nota pode gerar mais de uma ocorrência."
+            />
+          }
+        >
           <div className="overflow-x-auto">
             <table className="w-full text-[11px]">
               <thead>
-                <tr className="text-left text-gray-500">
+                <tr className="text-left text-tinta-suave">
                   <th className="pb-2 font-medium">FORNECEDOR</th>
                   <th className="pb-2 font-medium">CNPJ</th>
                   <th className="pb-2 text-right font-medium">NOTAS</th>
@@ -703,22 +767,22 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
                   .slice(0, 6)
                   .map(f => (
                     <tr key={f.cnpj} className="border-t border-fundo-borda">
-                      <td className="max-w-[150px] truncate py-2 text-gray-200">{f.nome}</td>
-                      <td className="py-2 font-mono text-gray-500">{formatarCNPJ(f.cnpj)}</td>
-                      <td className="py-2 text-right text-gray-400">{formatarInteiro(f.qtd)}</td>
+                      <td className="max-w-[150px] truncate py-2 text-tinta-media">{f.nome}</td>
+                      <td className="py-2 font-mono text-tinta-suave">{formatarCNPJ(f.cnpj)}</td>
+                      <td className="py-2 text-right text-tinta-fraca">{formatarInteiro(f.qtd)}</td>
                       <td className="py-2 text-right">
                         <span className="rounded bg-red-500/15 px-1.5 py-0.5 font-semibold text-red-300">
                           {formatarInteiro(f.divergencias)}
                         </span>
                       </td>
-                      <td className="py-2 text-right font-mono text-gray-300">
+                      <td className="py-2 text-right font-mono text-tinta-media">
                         {formatarMoedaCompacta(f.valor)}
                       </td>
                     </tr>
                   ))}
                 {dados.fornecedores.filter(f => f.divergencias > 0).length === 0 && (
                   <tr>
-                    <td colSpan={5} className="py-6 text-center text-gray-500">
+                    <td colSpan={5} className="py-6 text-center text-tinta-suave">
                       Nenhuma divergência nos filtros atuais.
                     </td>
                   </tr>
@@ -728,11 +792,26 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
           </div>
         </Painel>
 
-        <Painel titulo="Composição por regime" subtitulo="fornecedores, notas e valor">
+        <Painel
+          titulo="Composição por regime"
+          subtitulo="fornecedores, notas e valor"
+          memoria={
+            <MemoriaCalculo
+              titulo="Composição por regime"
+              descricao="O regime é inferido a partir dos tributos destacados na nota, e não de cadastro externo."
+              linhas={[
+                { rotulo: 'Fornecedores', valor: 'CNPJs distintos no regime' },
+                { rotulo: 'Notas', valor: 'documentos importados' },
+                { rotulo: 'Valor', valor: 'soma de vNF' },
+              ]}
+              origem="Fornecedor que emite em mais de um regime aparece em cada um deles."
+            />
+          }
+        >
           <div className="overflow-x-auto">
             <table className="w-full text-[11px]">
               <thead>
-                <tr className="text-left text-gray-500">
+                <tr className="text-left text-tinta-suave">
                   <th className="pb-2 font-medium">REGIME</th>
                   <th className="pb-2 text-right font-medium">FORNECEDORES</th>
                   <th className="pb-2 text-right font-medium">NOTAS</th>
@@ -745,15 +824,15 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
                   .sort((a, b) => b.valor - a.valor)
                   .map(r => (
                     <tr key={r.regime} className="border-t border-fundo-borda">
-                      <td className="py-2 font-medium text-gray-200">{r.regime}</td>
+                      <td className="py-2 font-medium text-tinta-media">{r.regime}</td>
                       <td className="py-2 text-right text-marca-neon">
                         {formatarInteiro(r.fornecedores)}
                       </td>
-                      <td className="py-2 text-right text-gray-400">{formatarInteiro(r.qtd)}</td>
-                      <td className="py-2 text-right font-mono text-gray-300">
+                      <td className="py-2 text-right text-tinta-fraca">{formatarInteiro(r.qtd)}</td>
+                      <td className="py-2 text-right font-mono text-tinta-media">
                         {formatarMoedaCompacta(r.valor)}
                       </td>
-                      <td className="py-2 text-right text-gray-400">
+                      <td className="py-2 text-right text-tinta-fraca">
                         {formatarPercentual(dados.valor > 0 ? (r.valor / dados.valor) * 100 : 0, 1)}
                       </td>
                     </tr>

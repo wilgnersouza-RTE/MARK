@@ -66,7 +66,7 @@ const Seletor: React.FC<{
   placeholder?: string;
 }> = ({ rotulo, valor, opcoes, onChange, ajuda, desabilitado, placeholder = 'Selecione...' }) => (
   <div>
-    <label className="mb-1 flex items-center gap-1.5 text-sm font-semibold text-gray-200">
+    <label className="mb-1 flex items-center gap-1.5 text-sm font-semibold text-tinta-media">
       {rotulo}
       {ajuda && <AjudaIcone tamanho={15} largura={340} conteudo={ajuda} />}
     </label>
@@ -75,7 +75,7 @@ const Seletor: React.FC<{
         value={valor}
         onChange={e => onChange(e.target.value)}
         disabled={desabilitado}
-        className="w-full appearance-none rounded-lg border border-fundo-borda bg-fundo-card px-3 py-2 pr-9 text-sm text-gray-100 transition focus:border-marca-azul focus:outline-none focus:ring-1 focus:ring-marca-azul disabled:cursor-not-allowed disabled:bg-fundo-eleva disabled:text-gray-500"
+        className="w-full appearance-none rounded-lg border border-fundo-borda bg-fundo-card px-3 py-2 pr-9 text-sm text-tinta-forte transition focus:border-marca-azul focus:outline-none focus:ring-1 focus:ring-marca-azul disabled:cursor-not-allowed disabled:bg-fundo-eleva disabled:text-tinta-suave"
       >
         <option value="">{placeholder}</option>
         {opcoes.map(o => (
@@ -86,7 +86,7 @@ const Seletor: React.FC<{
       </select>
       <ChevronDown
         size={16}
-        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-500"
+        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-tinta-suave"
       />
     </div>
   </div>
@@ -107,7 +107,7 @@ const Chave: React.FC<{
         aria-checked={ativo}
         onClick={() => onChange(!ativo)}
         className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
-          ativo ? 'bg-blue-600' : 'bg-gray-300'
+          ativo ? 'bg-marca-azul' : 'bg-fundo-borda'
         }`}
       >
         <span
@@ -116,7 +116,7 @@ const Chave: React.FC<{
           }`}
         />
       </button>
-      <span className="text-sm font-medium text-gray-200">{rotulo}</span>
+      <span className="text-sm font-medium text-tinta-media">{rotulo}</span>
     </div>
     {ajuda && <AjudaIcone tamanho={15} largura={320} conteudo={ajuda} />}
   </div>
@@ -124,7 +124,7 @@ const Chave: React.FC<{
 
 const Secao: React.FC<{ titulo: string; children: React.ReactNode }> = ({ titulo, children }) => (
   <fieldset className="rounded-lg border border-fundo-borda px-4 pb-4 pt-2">
-    <legend className="px-2 text-sm font-bold text-blue-300">{titulo}</legend>
+    <legend className="px-2 text-sm font-bold text-marca-azul">{titulo}</legend>
     {children}
   </fieldset>
 );
@@ -217,7 +217,7 @@ export const ConfiguracoesImportacao: React.FC<{
   return (
     <div className="space-y-4">
       {metadados && (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg bg-marca-azul/10 px-3 py-2 text-xs text-blue-300">
+        <div className="flex flex-wrap items-center gap-2 rounded-lg bg-marca-azul/10 px-3 py-2 text-xs text-marca-azul">
           <Info size={14} />
           <span>
             Informe Técnico {metadados.informeTecnico} v{metadados.versaoTabela} —{' '}
@@ -291,7 +291,7 @@ export const ConfiguracoesImportacao: React.FC<{
         </div>
 
         <div className="mt-4">
-          <label className="mb-1 block text-sm font-semibold text-gray-200">
+          <label className="mb-1 block text-sm font-semibold text-tinta-media">
             NF-e Referenciada
           </label>
           <input
@@ -398,10 +398,10 @@ export const ConfiguracoesImportacao: React.FC<{
                 if (!item) return null;
                 return (
                   <>
-                    <p className="mb-1 font-mono text-sm font-bold text-gray-100">{item.codigo}</p>
-                    <p className="text-sm leading-snug text-gray-200">{item.descricao}</p>
+                    <p className="mb-1 font-mono text-sm font-bold text-tinta-forte">{item.codigo}</p>
+                    <p className="text-sm leading-snug text-tinta-media">{item.descricao}</p>
                     {item.baseLegal && (
-                      <p className="mt-2 text-xs text-gray-500">Base legal: {item.baseLegal}</p>
+                      <p className="mt-2 text-xs text-tinta-suave">Base legal: {item.baseLegal}</p>
                     )}
                   </>
                 );
@@ -455,7 +455,7 @@ export const ConfiguracoesImportacao: React.FC<{
               className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition ${
                 op.ativo
                   ? 'border-green-500/50 bg-green-500/10 font-semibold text-green-300'
-                  : 'border-fundo-borda bg-fundo-card text-gray-500'
+                  : 'border-fundo-borda bg-fundo-card text-tinta-suave'
               }`}
             >
               <span
@@ -472,7 +472,7 @@ export const ConfiguracoesImportacao: React.FC<{
             </div>
           ))}
         </div>
-        <p className="mt-2 text-xs text-gray-500">
+        <p className="mt-2 text-xs text-tinta-suave">
           O regime é determinado pelo CST escolhido, conforme a Tabela de Indicadores do Informe
           Técnico — não é uma escolha livre.
         </p>

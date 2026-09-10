@@ -38,7 +38,7 @@ const Cabecalho: React.FC<{
     <button
       onClick={() => onOrdenar(coluna)}
       className={`inline-flex items-center gap-1 font-semibold transition-colors hover:text-marca-neon ${
-        ordemAtual.coluna === coluna ? 'text-marca-neon' : 'text-gray-200'
+        ordemAtual.coluna === coluna ? 'text-marca-neon' : 'text-tinta-media'
       }`}
     >
       {children}
@@ -182,7 +182,7 @@ export const AbaDivergencias: React.FC<{
         />
       </div>
 
-      <p className="mb-4 text-sm text-gray-500">
+      <p className="mb-4 text-sm text-tinta-suave">
         {temFiltro ? (
           <>
             {formatarInteiro(filtradas.length)} de {formatarInteiro(base.length)}{' '}
@@ -194,7 +194,7 @@ export const AbaDivergencias: React.FC<{
       </p>
 
       {base.length === 0 && !recalculando ? (
-        <p className="py-8 text-center text-gray-500">
+        <p className="py-8 text-center text-tinta-suave">
           Nenhuma divergência encontrada nos documentos importados.
         </p>
       ) : (
@@ -203,7 +203,7 @@ export const AbaDivergencias: React.FC<{
           <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
             <div className="mb-2 flex items-center gap-2">
               <Calendar size={15} className="text-amber-600" />
-              <span className="text-xs font-bold uppercase tracking-wide text-gray-200">
+              <span className="text-xs font-bold uppercase tracking-wide text-tinta-media">
                 Ano de referência do cálculo
               </span>
               <AjudaIcone
@@ -232,8 +232,8 @@ export const AbaDivergencias: React.FC<{
                 onClick={() => setAnoReferencia('atual')}
                 className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${
                   anoReferencia === 'atual'
-                    ? 'bg-blue-600 text-white shadow'
-                    : 'bg-fundo-card text-gray-500 ring-1 ring-fundo-borda hover:bg-fundo-eleva'
+                    ? 'bg-marca-azul text-white shadow'
+                    : 'bg-fundo-card text-tinta-suave ring-1 ring-fundo-borda hover:bg-fundo-eleva'
                 }`}
               >
                 Legislação atual
@@ -246,7 +246,7 @@ export const AbaDivergencias: React.FC<{
                   className={`rounded-md px-3 py-1.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${
                     anoReferencia === String(a)
                       ? 'bg-amber-500 text-white shadow'
-                      : 'bg-fundo-card text-gray-500 ring-1 ring-fundo-borda hover:bg-amber-500/20'
+                      : 'bg-fundo-card text-tinta-suave ring-1 ring-fundo-borda hover:bg-amber-500/20'
                   }`}
                 >
                   {a}
@@ -255,10 +255,10 @@ export const AbaDivergencias: React.FC<{
             </div>
 
             {recalculando && (
-              <p className="mt-2 text-xs text-gray-500">Recalculando pela legislação do ano...</p>
+              <p className="mt-2 text-xs text-tinta-suave">Recalculando pela legislação do ano...</p>
             )}
             {contexto && !recalculando && (
-              <p className="mt-2 text-xs leading-snug text-gray-500">
+              <p className="mt-2 text-xs leading-snug text-tinta-suave">
                 <strong>{contexto.titulo}.</strong> {contexto.resumo}
               </p>
             )}
@@ -268,13 +268,13 @@ export const AbaDivergencias: React.FC<{
           <div className="mb-4 rounded-lg border border-fundo-borda bg-fundo-eleva p-4">
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
               <div className="lg:col-span-2">
-                <label className="mb-1 block text-xs font-medium text-gray-500">
+                <label className="mb-1 block text-xs font-medium text-tinta-suave">
                   Buscar por fornecedor, tributo ou ano
                 </label>
                 <div className="relative">
                   <Search
                     size={16}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-tinta-suave"
                   />
                   <input
                     type="text"
@@ -286,7 +286,7 @@ export const AbaDivergencias: React.FC<{
                   {busca && (
                     <button
                       onClick={() => setBusca('')}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-200"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-tinta-suave hover:text-tinta-media"
                       aria-label="Limpar busca"
                     >
                       <X size={16} />
@@ -296,7 +296,7 @@ export const AbaDivergencias: React.FC<{
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-medium text-gray-500">Tributo</label>
+                <label className="mb-1 block text-xs font-medium text-tinta-suave">Tributo</label>
                 <select
                   value={tributo}
                   onChange={e => setTributo(e.target.value)}
@@ -312,7 +312,7 @@ export const AbaDivergencias: React.FC<{
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-medium text-gray-500">Ano</label>
+                <label className="mb-1 block text-xs font-medium text-tinta-suave">Ano</label>
                 <select
                   value={ano}
                   onChange={e => setAno(e.target.value)}
@@ -329,7 +329,7 @@ export const AbaDivergencias: React.FC<{
             </div>
 
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="text-xs font-medium text-gray-500">Sentido:</span>
+              <span className="text-xs font-medium text-tinta-suave">Sentido:</span>
               {[
                 { id: 'todos', rotulo: 'Todos' },
                 { id: 'maior', rotulo: 'Recolheu a menos' },
@@ -340,8 +340,8 @@ export const AbaDivergencias: React.FC<{
                   onClick={() => setSentido(op.id)}
                   className={`rounded-full px-3 py-1 text-xs font-medium transition ${
                     sentido === op.id
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-fundo-card text-gray-500 ring-1 ring-fundo-borda hover:bg-fundo-eleva'
+                      ? 'bg-marca-azul text-white'
+                      : 'bg-fundo-card text-tinta-suave ring-1 ring-fundo-borda hover:bg-fundo-eleva'
                   }`}
                 >
                   {op.rotulo}
@@ -361,7 +361,7 @@ export const AbaDivergencias: React.FC<{
 
           {/* ==================== TABELA ==================== */}
           {filtradas.length === 0 ? (
-            <p className="py-8 text-center text-gray-500">
+            <p className="py-8 text-center text-tinta-suave">
               Nenhuma divergência corresponde aos filtros aplicados.
             </p>
           ) : (
@@ -380,12 +380,12 @@ export const AbaDivergencias: React.FC<{
                 <tbody>
                   {visiveis.map((div, i) => (
                     <tr key={i} className="border-b border-fundo-borda transition-colors hover:bg-marca-azul/10">
-                      <td className="px-2 py-2 font-semibold text-gray-100">{div.tributo}</td>
-                      <td className="px-2 py-2 text-gray-500">{div.ano}</td>
-                      <td className="px-2 py-2 text-right font-mono text-gray-100">
+                      <td className="px-2 py-2 font-semibold text-tinta-forte">{div.tributo}</td>
+                      <td className="px-2 py-2 text-tinta-suave">{div.ano}</td>
+                      <td className="px-2 py-2 text-right font-mono text-tinta-forte">
                         {formatarMoeda(div.valorAtual)}
                       </td>
-                      <td className="px-2 py-2 text-right font-mono text-gray-100">
+                      <td className="px-2 py-2 text-right font-mono text-tinta-forte">
                         {formatarMoeda(div.valorPrevisto)}
                       </td>
                       <td
@@ -398,7 +398,7 @@ export const AbaDivergencias: React.FC<{
                           ({formatarPercentual(div.percentual, 1)})
                         </span>
                       </td>
-                      <td className="max-w-[220px] truncate px-2 py-2 text-gray-500">
+                      <td className="max-w-[220px] truncate px-2 py-2 text-tinta-suave">
                         {div.fornecedor || '-'}
                       </td>
                     </tr>
@@ -410,11 +410,11 @@ export const AbaDivergencias: React.FC<{
 
           {/* ==================== RODAPÉ: LIMITE DE LINHAS ==================== */}
           <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-fundo-borda pt-4">
-            <div className="text-sm text-gray-500">
+            <div className="text-sm text-tinta-suave">
               Exibindo <strong>{formatarInteiro(visiveis.length)}</strong> de{' '}
               <strong>{formatarInteiro(filtradas.length)}</strong> ocorrências
               {filtradas.length > 0 && (
-                <span className="ml-3 text-gray-500">
+                <span className="ml-3 text-tinta-suave">
                   Soma das diferenças:{' '}
                   <span
                     className={`font-mono font-semibold ${
@@ -428,15 +428,15 @@ export const AbaDivergencias: React.FC<{
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-500">Linhas por página:</span>
+              <span className="text-sm text-tinta-suave">Linhas por página:</span>
               {LIMITES.map(n => (
                 <button
                   key={n}
                   onClick={() => setLimite(n)}
                   className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
                     limite === n
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-fundo-card text-gray-500 ring-1 ring-fundo-borda hover:bg-fundo-eleva'
+                      ? 'bg-marca-azul text-white'
+                      : 'bg-fundo-card text-tinta-suave ring-1 ring-fundo-borda hover:bg-fundo-eleva'
                   }`}
                 >
                   {n}
@@ -446,7 +446,7 @@ export const AbaDivergencias: React.FC<{
           </div>
 
           {filtradas.length > limite && (
-            <p className="mt-2 text-center text-sm text-gray-500">
+            <p className="mt-2 text-center text-sm text-tinta-suave">
               Há mais {formatarInteiro(filtradas.length - limite)} ocorrências além do limite
               atual. Aumente o número de linhas ou refine os filtros.
             </p>

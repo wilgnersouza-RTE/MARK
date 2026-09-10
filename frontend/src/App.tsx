@@ -9,6 +9,7 @@ import {
   CheckCircle, XCircle, Calendar, Building2, DollarSign, Settings
 } from 'lucide-react';
 
+import { MarcaRTE } from './components/Marca';
 import { Tooltip as DicaHover, AjudaIcone, MemoriaCalculo } from './components/Tooltip';
 import { AbaDivergencias } from './components/AbaDivergencias';
 import { AbaReforma } from './components/AbaReforma';
@@ -24,6 +25,11 @@ import {
   formatarMoeda, formatarMoedaCompacta, formatarInteiro,
   formatarPercentual, formatarCNPJ,
 } from './utils/format';
+import {
+  MODELOS_DOCUMENTO,
+  type ModeloDocumento,
+  type ArquivoRejeitado,
+} from './utils/modelos';
 
 
 // ==================== TIPOS ====================
@@ -44,6 +50,8 @@ interface ResumoGeral {
   totalValor: number;
   totalTributos: number;
   totalICMS: number;
+  totalICMSST: number;
+  totalIPI: number;
   totalISS: number;
   totalPIS: number;
   totalCOFINS: number;
@@ -152,16 +160,13 @@ const Header: React.FC<{ user: any; onLogout: () => void }> = ({ user, onLogout 
           <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-marca-azul to-marca-roxo text-white shadow-neon">
             <FileText size={18} />
           </span>
-          <span className="text-lg font-bold tracking-tight">
-            <span className="text-white">Contabilidade</span>
-            <span className="text-marca-neon">.net</span>
-          </span>
+          <MarcaRTE tamanho={20} />
         </div>
 
         <div className="flex items-center gap-4">
           <div className="hidden text-right sm:block">
-            <p className="text-xs text-gray-500">Logado como</p>
-            <p className="text-sm font-semibold text-gray-200">
+            <p className="text-xs text-tinta-suave">Logado como</p>
+            <p className="text-sm font-semibold text-tinta-media">
               {user?.nome || user?.email}
             </p>
           </div>
@@ -172,7 +177,7 @@ const Header: React.FC<{ user: any; onLogout: () => void }> = ({ user, onLogout 
 
           <button
             onClick={onLogout}
-            className="flex items-center gap-2 rounded-lg border border-fundo-borda px-3 py-2 text-sm text-gray-400 transition hover:border-red-500/50 hover:text-red-400"
+            className="flex items-center gap-2 rounded-lg border border-fundo-borda px-3 py-2 text-sm text-tinta-fraca transition hover:border-red-500/50 hover:text-red-400"
           >
             <LogOut size={16} />
             <span className="hidden sm:inline">Sair</span>
@@ -192,20 +197,11 @@ const Banner: React.FC = () => (
     className="relative h-56 overflow-hidden border-b border-fundo-borda bg-cover bg-center md:h-72"
     style={{ backgroundImage: "url('/banner.jpg')" }}
   >
-    <div className="absolute inset-0 bg-gradient-to-br from-[#12002e] via-[#0b1a3a] to-[#04060f]" />
-
-    <div className="absolute inset-0 opacity-80">
-      <div className="absolute -left-32 top-1/4 h-[420px] w-[420px] rounded-full bg-marca-roxo/25 blur-[130px]" />
-      <div className="absolute -right-24 bottom-0 h-[380px] w-[380px] rounded-full bg-marca-ciano/20 blur-[120px]" />
-      <div className="absolute left-0 top-8 h-[2px] w-full bg-gradient-to-r from-transparent via-marca-neon/60 to-transparent" />
-      <div className="absolute bottom-10 left-[10%] h-[1px] w-[50%] bg-gradient-to-r from-transparent via-marca-ciano/50 to-transparent" />
-    </div>
+    <div className="absolute inset-0 bg-marca-roxo" />
 
     <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center">
-      <h1 className="text-3xl font-bold tracking-tight text-white/90 drop-shadow-[0_0_25px_rgba(79,140,255,0.5)] md:text-5xl">
-        Contabilidade<span className="text-marca-neon">.net</span>
-      </h1>
-      <p className="mt-3 max-w-xl text-sm text-blue-100/60 md:text-base">
+      <MarcaRTE tamanho={52} invertida />
+      <p className="mt-3 max-w-xl text-sm text-white/75 md:text-base">
         Validador da Reforma Tributária do Consumo — NF-e / NFC-e
       </p>
     </div>
@@ -232,22 +228,22 @@ const StatCard: React.FC<{
   <Card className={`border-l-4 ${color}`}>
     <div className="flex items-start justify-between">
       <div className="min-w-0">
-        <p className="text-gray-500 text-sm font-medium">{label}</p>
-        <p className="text-2xl font-bold text-gray-100 mt-2 break-words">{value}</p>
+        <p className="text-tinta-suave text-sm font-medium">{label}</p>
+        <p className="text-2xl font-bold text-tinta-forte mt-2 break-words">{value}</p>
         {complemento && <div className="mt-2">{complemento}</div>}
       </div>
 
       {memoria ? (
         <DicaHover conteudo={memoria} largura={340}>
-          <span className="relative rounded-lg border border-fundo-borda p-2 text-gray-500 transition-colors hover:border-blue-400 hover:text-blue-400">
+          <span className="relative rounded-lg border border-fundo-borda p-2 text-tinta-suave transition-colors hover:border-blue-400 hover:text-marca-azul">
             {icon}
-            <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 text-[10px] font-bold text-white">
+            <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-marca-azul text-[10px] font-bold text-white">
               ?
             </span>
           </span>
         </DicaHover>
       ) : (
-        <div className="text-gray-500">{icon}</div>
+        <div className="text-tinta-suave">{icon}</div>
       )}
     </div>
   </Card>
@@ -262,7 +258,9 @@ const UploadSection: React.FC<{
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [tipo, setTipo] = useState<'entrada' | 'saida'>('entrada');
-  const [modelo, setModelo] = useState<'55' | '65'>('55');
+  const [modelo, setModelo] = useState<ModeloDocumento>('55');
+  // Arquivos que o ZIP trazia mas que não batiam com o que foi selecionado.
+  const [rejeitados, setRejeitados] = useState<ArquivoRejeitado[]>([]);
   const [mostrarConfig, setMostrarConfig] = useState(false);
   const [config, setConfig] = useState<TipoConfig>(CONFIGURACAO_PADRAO);
 
@@ -274,6 +272,7 @@ const UploadSection: React.FC<{
 
     setIsUploading(true);
     setUploadError(null);
+    setRejeitados([]);
 
     try {
       const formData = new FormData();
@@ -292,12 +291,17 @@ const UploadSection: React.FC<{
 
       if (response.data.success) {
         setUploadError(null);
+        // Importação parcial: alguns XMLs entraram, outros foram recusados.
+        // Antes isso passava em silêncio e o usuário só via o total errado.
+        setRejeitados(response.data.data?.erros ?? []);
         await onUploadSuccess();
       } else {
         setUploadError(response.data.error);
+        setRejeitados(response.data.details ?? []);
       }
     } catch (error: any) {
       setUploadError(error.response?.data?.error || error.message);
+      setRejeitados(error.response?.data?.details ?? []);
     } finally {
       setIsUploading(false);
     }
@@ -306,12 +310,29 @@ const UploadSection: React.FC<{
   return (
     <Card className="border-2 border-dashed border-marca-azul/40 bg-marca-azul/[0.06]">
       <div className="text-center">
-        <Upload className="mx-auto mb-4 text-blue-400" size={40} />
-        <h3 className="text-lg font-semibold mb-4">Importar Notas Fiscais</h3>
+        <Upload className="mx-auto mb-4 text-marca-azul" size={40} />
+        <div className="mb-4 flex items-center justify-center gap-2">
+          <h3 className="text-lg font-semibold">Importar Notas Fiscais</h3>
+          <AjudaIcone
+            largura={340}
+            conteudo={
+              <MemoriaCalculo
+                titulo="Como a importação é validada"
+                descricao="Cada XML do ZIP é conferido contra o tipo e o modelo selecionados antes de entrar na base."
+                linhas={[
+                  { rotulo: 'Modelo', valor: 'comparado à tag mod do XML' },
+                  { rotulo: 'Conteúdo', valor: 'precisa ter valores fiscais' },
+                  { rotulo: 'Recusados', valor: 'listados com o motivo' },
+                ]}
+                origem="Arquivo de modelo diferente do selecionado é recusado individualmente, sem derrubar a importação inteira."
+              />
+            }
+          />
+        </div>
 
         <div className="grid grid-cols-2 gap-4 mb-4">
           <div>
-            <label className="block text-sm font-medium text-gray-200 mb-2">Tipo</label>
+            <label className="block text-sm font-medium text-tinta-media mb-2">Tipo</label>
             <select
               value={tipo}
               onChange={e => setTipo(e.target.value as 'entrada' | 'saida')}
@@ -322,14 +343,17 @@ const UploadSection: React.FC<{
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-200 mb-2">Modelo</label>
+            <label className="block text-sm font-medium text-tinta-media mb-2">Modelo</label>
             <select
               value={modelo}
-              onChange={e => setModelo(e.target.value as '55' | '65')}
+              onChange={e => setModelo(e.target.value as ModeloDocumento)}
               className="w-full px-3 py-2 border border-fundo-borda rounded-lg"
             >
-              <option value="55">55 (Produto)</option>
-              <option value="65">65 (Serviço)</option>
+              {MODELOS_DOCUMENTO.map(m => (
+                <option key={m.codigo} value={m.codigo}>
+                  {m.nome} ({m.codigo})
+                </option>
+              ))}
             </select>
           </div>
         </div>
@@ -349,19 +373,42 @@ const UploadSection: React.FC<{
           {isUploading ? 'Processando...' : 'Escolher arquivo ZIP'}
         </label>
 
-        {uploadError && <p className="text-red-400 text-sm mt-4">{uploadError}</p>}
-        <p className="text-gray-500 text-sm mt-4">📦 Máximo 50MB • ZIP contendo XMLs de NF-e</p>
+        {uploadError && <p className="text-red-600 text-sm mt-4">{uploadError}</p>}
+
+        {rejeitados.length > 0 && (
+          <div className="mt-4 rounded-lg border border-amber-400/60 bg-amber-50 p-4 text-left">
+            <p className="flex items-center gap-2 text-sm font-semibold text-amber-800">
+              <AlertTriangle size={16} />
+              {rejeitados.length} arquivo{rejeitados.length > 1 ? 's' : ''} não
+              {rejeitados.length > 1 ? ' foram' : ' foi'} importado
+              {rejeitados.length > 1 ? 's' : ''}
+            </p>
+            <ul className="mt-2 space-y-1">
+              {rejeitados.slice(0, 8).map((r, i) => (
+                <li key={i} className="text-xs leading-snug text-amber-900">
+                  <span className="font-mono">{r.nomeArquivo}</span> — {r.erro}
+                </li>
+              ))}
+            </ul>
+            {rejeitados.length > 8 && (
+              <p className="mt-2 text-xs text-amber-800">
+                e mais {rejeitados.length - 8}.
+              </p>
+            )}
+          </div>
+        )}
+        <p className="text-tinta-suave text-sm mt-4">📦 Máximo 50MB • ZIP contendo XMLs de NF-e</p>
 
         {/* Configurações da Reforma Tributária do Consumo (IT 2025.002) */}
         <div className="mt-6 border-t border-fundo-borda border-marca-azul/30 pt-4">
           <button
             type="button"
             onClick={() => setMostrarConfig(v => !v)}
-            className="mx-auto flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-blue-300 transition hover:bg-blue-100"
+            className="mx-auto flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-marca-azul transition hover:bg-marca-azul/10"
           >
             <Settings size={16} />
             Configurações da Reforma Tributária
-            <span className="text-xs font-normal text-gray-500">
+            <span className="text-xs font-normal text-tinta-suave">
               {mostrarConfig ? '(ocultar)' : '(CST, cClassTrib e demais campos)'}
             </span>
           </button>
@@ -426,8 +473,8 @@ const DashboardContent: React.FC<{
   if (!resumo) {
     return (
       <div className="text-center py-12">
-        <FileText size={48} className="mx-auto text-gray-500 mb-4" />
-        <p className="text-gray-500">Nenhum dado disponível. Faça upload de NF-e para começar.</p>
+        <FileText size={48} className="mx-auto text-tinta-suave mb-4" />
+        <p className="text-tinta-suave">Nenhum dado disponível. Faça upload de NF-e para começar.</p>
       </div>
     );
   }
@@ -487,9 +534,11 @@ const DashboardContent: React.FC<{
           memoria={
             <MemoriaCalculo
               titulo="Total de Tributos"
-              descricao="Soma dos cinco tributos destacados nas notas."
+              descricao="Soma de todos os tributos destacados nas notas."
               linhas={[
                 { rotulo: 'ICMS', valor: formatarMoeda(resumo.totalICMS) },
+                { rotulo: 'ICMS-ST', valor: formatarMoeda(resumo.totalICMSST) },
+                { rotulo: 'IPI', valor: formatarMoeda(resumo.totalIPI) },
                 { rotulo: 'ISS', valor: formatarMoeda(resumo.totalISS) },
                 { rotulo: 'PIS', valor: formatarMoeda(resumo.totalPIS) },
                 { rotulo: 'COFINS', valor: formatarMoeda(resumo.totalCOFINS) },
@@ -587,7 +636,7 @@ const DashboardContent: React.FC<{
               className={`px-4 py-2 font-semibold border-b-2 transition ${
                 activeTab === tab.id
                   ? 'border-marca-neon text-marca-neon'
-                  : 'border-transparent text-gray-500 hover:text-gray-50'
+                  : 'border-transparent text-tinta-suave hover:text-gray-50'
               }`}
             >
               {tab.label}
@@ -621,7 +670,7 @@ const DashboardContent: React.FC<{
                   }
                 />
               </div>
-              <p className="mb-4 text-sm text-gray-500">
+              <p className="mb-4 text-sm text-tinta-suave">
                 Total de {formatarMoeda(resumo.totalTributos)} em tributos destacados
               </p>
 
@@ -629,11 +678,16 @@ const DashboardContent: React.FC<{
                 // Barras horizontais em vez de pizza: com 5 tributos de ordens de
                 // grandeza muito diferentes, as fatias e os rótulos se sobrepõem
                 // e fica impossível comparar valores.
+                // A lista precisa cobrir todo tributo destacado na nota. O IPI
+                // e o ICMS-ST faltavam aqui, e era por isso que esta aba não
+                // fechava com o Painel.
                 const tributos = [
-                  { nome: 'ICMS', valor: resumo.totalICMS, cor: '#2563eb' },
+                  { nome: 'ICMS', valor: resumo.totalICMS, cor: '#7F2BF5' },
+                  { nome: 'ICMS-ST', valor: resumo.totalICMSST, cor: '#5E1BB8' },
+                  { nome: 'IPI', valor: resumo.totalIPI, cor: '#B47CFF' },
                   { nome: 'COFINS', valor: resumo.totalCOFINS, cor: '#0891b2' },
-                  { nome: 'PIS', valor: resumo.totalPIS, cor: '#7c3aed' },
-                  { nome: 'ISS', valor: resumo.totalISS, cor: '#ea580c' },
+                  { nome: 'PIS', valor: resumo.totalPIS, cor: '#1D9E75' },
+                  { nome: 'ISS', valor: resumo.totalISS, cor: '#EF9F27' },
                   { nome: 'IRRF', valor: resumo.totalIRRF, cor: '#65a30d' },
                 ]
                   .filter(t => t.valor > 0)
@@ -641,7 +695,7 @@ const DashboardContent: React.FC<{
 
                 if (tributos.length === 0) {
                   return (
-                    <p className="py-12 text-center text-gray-500">
+                    <p className="py-12 text-center text-tinta-suave">
                       Nenhum tributo destacado nas notas importadas.
                     </p>
                   );
@@ -657,18 +711,18 @@ const DashboardContent: React.FC<{
                         layout="vertical"
                         margin={{ top: 5, right: 90, left: 10, bottom: 5 }}
                       >
-                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#2a2a3a" />
+                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E5E3DC" />
                         <XAxis
                           type="number"
                           tickFormatter={formatarMoedaCompacta}
-                          stroke="#9ca3af"
+                          stroke="#888780"
                           fontSize={12}
                         />
                         <YAxis
                           type="category"
                           dataKey="nome"
                           width={70}
-                          stroke="#9ca3af"
+                          stroke="#888780"
                           fontSize={13}
                           tickLine={false}
                           axisLine={false}
@@ -705,11 +759,11 @@ const DashboardContent: React.FC<{
                             className="h-3 w-3 shrink-0 rounded-sm"
                             style={{ backgroundColor: t.cor }}
                           />
-                          <span className="w-16 font-medium text-gray-200">{t.nome}</span>
-                          <span className="flex-1 text-right font-mono text-gray-100">
+                          <span className="w-16 font-medium text-tinta-media">{t.nome}</span>
+                          <span className="flex-1 text-right font-mono text-tinta-forte">
                             {formatarMoeda(t.valor)}
                           </span>
-                          <span className="w-16 text-right text-gray-500">
+                          <span className="w-16 text-right text-tinta-suave">
                             {formatarPercentual(total > 0 ? (t.valor / total) * 100 : 0, 1)}
                           </span>
                         </div>
@@ -739,14 +793,14 @@ const DashboardContent: React.FC<{
                   }
                 />
               </div>
-              <p className="mb-4 text-sm text-gray-500">
+              <p className="mb-4 text-sm text-tinta-suave">
                 {formatarInteiro(resumo.totalDocumentos)} documentos analisados
               </p>
 
               <div className="space-y-5">
                 <div>
                   <div className="mb-2 flex items-center justify-between">
-                    <span className="flex items-center gap-2 text-gray-500">
+                    <span className="flex items-center gap-2 text-tinta-suave">
                       <CheckCircle size={16} className="text-green-400" />
                       Conformes
                       <AjudaIcone
@@ -768,14 +822,14 @@ const DashboardContent: React.FC<{
                         }
                       />
                     </span>
-                    <span className="font-semibold text-gray-100">
+                    <span className="font-semibold text-tinta-forte">
                       {formatarInteiro(resumo.documentosConformes)}
-                      <span className="ml-2 text-sm font-normal text-gray-500">
+                      <span className="ml-2 text-sm font-normal text-tinta-suave">
                         {formatarPercentual(resumo.percentualConformidade, 1)}
                       </span>
                     </span>
                   </div>
-                  <div className="h-2 w-full rounded-full bg-white/10">
+                  <div className="h-2 w-full rounded-full bg-fundo-borda">
                     <div
                       className="h-2 rounded-full bg-green-500 transition-all"
                       style={{ width: `${Math.min(100, Math.max(0, resumo.percentualConformidade))}%` }}
@@ -785,7 +839,7 @@ const DashboardContent: React.FC<{
 
                 <div>
                   <div className="mb-2 flex items-center justify-between">
-                    <span className="flex items-center gap-2 text-gray-500">
+                    <span className="flex items-center gap-2 text-tinta-suave">
                       <AlertTriangle size={16} className="text-red-400" />
                       Com divergências
                       <AjudaIcone
@@ -810,14 +864,14 @@ const DashboardContent: React.FC<{
                         }
                       />
                     </span>
-                    <span className="font-semibold text-gray-100">
+                    <span className="font-semibold text-tinta-forte">
                       {formatarInteiro(resumo.documentosComDivergencias)}
-                      <span className="ml-2 text-sm font-normal text-gray-500">
+                      <span className="ml-2 text-sm font-normal text-tinta-suave">
                         {formatarPercentual(100 - resumo.percentualConformidade, 1)}
                       </span>
                     </span>
                   </div>
-                  <div className="h-2 w-full rounded-full bg-white/10">
+                  <div className="h-2 w-full rounded-full bg-fundo-borda">
                     <div
                       className="h-2 rounded-full bg-red-500 transition-all"
                       style={{
@@ -855,31 +909,31 @@ const DashboardContent: React.FC<{
                 }
               />
             </div>
-            <p className="mb-4 text-sm text-gray-500">
+            <p className="mb-4 text-sm text-tinta-suave">
               {formatarInteiro(regimes.reduce((s, r) => s + r.quantidadeFornecedores, 0))}{' '}
               fornecedores distribuídos em {regimes.length} regime(s)
             </p>
 
             {regimes.length === 0 ? (
-              <p className="py-12 text-center text-gray-500">
+              <p className="py-12 text-center text-tinta-suave">
                 Nenhum dado de regime disponível.
               </p>
             ) : (
               <>
                 <ResponsiveContainer width="100%" height={380}>
                   <BarChart data={regimes} margin={{ top: 20, right: 20, left: 10, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#2a2a3a" />
-                    <XAxis dataKey="regime" stroke="#9ca3af" fontSize={12} tickLine={false} />
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E3DC" />
+                    <XAxis dataKey="regime" stroke="#888780" fontSize={12} tickLine={false} />
                     <YAxis
                       tickFormatter={formatarMoedaCompacta}
-                      stroke="#9ca3af"
+                      stroke="#888780"
                       fontSize={12}
                       tickLine={false}
                       axisLine={false}
                     />
                     <Tooltip
                       cursor={{ fill: 'rgba(37, 99, 235, 0.06)' }}
-                      contentStyle={{ borderRadius: 8, border: '1px solid #2a2a3a', backgroundColor: '#13131c', color: '#e5e7eb', fontSize: 13 }}
+                      contentStyle={{ borderRadius: 8, border: '1px solid #2a2a3a', backgroundColor: '#FFFFFF', color: '#3D3D3A', fontSize: 13 }}
                       formatter={(valor: any, nome: any) => [formatarMoeda(valor), nome]}
                       labelFormatter={(rotulo: any) => {
                         const r = regimes.find(x => x.regime === rotulo);
@@ -889,7 +943,7 @@ const DashboardContent: React.FC<{
                       }}
                     />
                     <Legend wrapperStyle={{ fontSize: 13, paddingTop: 8 }} />
-                    <Bar dataKey="valor" fill="#2563eb" name="Valor Total" radius={[6, 6, 0, 0]} />
+                    <Bar dataKey="valor" fill="#7F2BF5" name="Valor Total" radius={[6, 6, 0, 0]} />
                     <Bar dataKey="tributos" fill="#ea580c" name="Tributos" radius={[6, 6, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -898,7 +952,7 @@ const DashboardContent: React.FC<{
                 <div className="mt-6 overflow-x-auto border-t border-fundo-borda pt-4">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-fundo-borda bg-fundo-eleva text-gray-200">
+                      <tr className="border-b border-fundo-borda bg-fundo-eleva text-tinta-media">
                         <th className="px-3 py-2 text-left font-semibold">Regime</th>
                         <th className="px-3 py-2 text-right font-semibold">Fornecedores</th>
                         <th className="px-3 py-2 text-right font-semibold">Notas</th>
@@ -910,23 +964,23 @@ const DashboardContent: React.FC<{
                     <tbody>
                       {regimes.map(r => (
                         <tr key={r.regime} className="border-b border-fundo-borda hover:bg-marca-azul/10">
-                          <td className="px-3 py-2 font-semibold text-gray-100">{r.regime}</td>
+                          <td className="px-3 py-2 font-semibold text-tinta-forte">{r.regime}</td>
                           <td className="px-3 py-2 text-right">
-                            <span className="inline-flex items-center gap-1 rounded-full bg-marca-azul/10 px-2.5 py-0.5 font-semibold text-blue-300">
+                            <span className="inline-flex items-center gap-1 rounded-full bg-marca-azul/10 px-2.5 py-0.5 font-semibold text-marca-azul">
                               <Building2 size={13} />
                               {formatarInteiro(r.quantidadeFornecedores)}
                             </span>
                           </td>
-                          <td className="px-3 py-2 text-right font-mono text-gray-200">
+                          <td className="px-3 py-2 text-right font-mono text-tinta-media">
                             {formatarInteiro(r.quantidade)}
                           </td>
-                          <td className="px-3 py-2 text-right font-mono text-gray-100">
+                          <td className="px-3 py-2 text-right font-mono text-tinta-forte">
                             {formatarMoeda(r.valor)}
                           </td>
                           <td className="px-3 py-2 text-right font-mono text-orange-300">
                             {formatarMoeda(r.tributos)}
                           </td>
-                          <td className="px-3 py-2 text-right text-gray-500">
+                          <td className="px-3 py-2 text-right text-tinta-suave">
                             {formatarPercentual(r.valor > 0 ? (r.tributos / r.valor) * 100 : 0, 1)}
                           </td>
                         </tr>
@@ -941,7 +995,24 @@ const DashboardContent: React.FC<{
 
         {activeTab === 'transicao' && (
           <Card>
-            <h3 className="font-semibold text-lg mb-4">Evolução Tributária (2024-2027)</h3>
+            <div className="mb-4 flex items-center gap-2">
+              <h3 className="text-lg font-semibold">Evolução Tributária (2024-2027)</h3>
+              <AjudaIcone
+                largura={330}
+                conteudo={
+                  <MemoriaCalculo
+                    titulo="Evolução Tributária"
+                    descricao="Recalcula os tributos das notas importadas com as alíquotas de cada ano da legislação cadastrada."
+                    linhas={[
+                      { rotulo: 'Base', valor: 'notas da sessão atual' },
+                      { rotulo: 'Alíquotas', valor: 'data/tax-rules.json' },
+                      { rotulo: 'Regime', valor: 'inferido nota a nota' },
+                    ]}
+                    origem="Os valores mudam quando a tabela de regras é atualizada."
+                  />
+                }
+              />
+            </div>
             <ResponsiveContainer width="100%" height={400}>
               <LineChart data={transicao?.dados || []}>
                 <CartesianGrid strokeDasharray="3 3" />
