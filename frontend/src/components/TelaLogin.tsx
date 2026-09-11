@@ -192,8 +192,7 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
 
           <div className="mb-8 text-center">
             <div className="mb-1 flex items-center justify-center gap-2">
-              <span className="h-4 w-4 rounded-full bg-marca-azul" />
-              <span className="text-lg font-semibold text-tinta-forte">RTE</span>
+              <MarcaRTE tamanho={22} />
             </div>
             <p className="text-sm text-tinta-media">
               {tela === 'criar'
@@ -397,9 +396,9 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
         style={{ backgroundImage: "url('/login-hero.jpg')" }}
       >
         <div className="absolute inset-0 flex flex-col justify-center px-[8%]">
-          <div className="rounded-xl border border-white/30 bg-white/10 p-10 text-center backdrop-blur-sm">
-            <MarcaRTE tamanho={34} invertida />
-            <p className="mt-3 text-sm text-white/85">
+          <div className="rounded-xl bg-fundo-card p-10 text-center shadow-lg">
+            <MarcaRTE tamanho={34} />
+            <p className="mt-3 text-sm text-tinta-media">
               Inteligência tributária para a reforma
             </p>
           </div>
