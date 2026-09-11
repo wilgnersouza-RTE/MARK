@@ -397,7 +397,7 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
         style={{ backgroundImage: "url('/login-hero.jpg')" }}
       >
         <div className="absolute inset-0 flex flex-col justify-center px-[8%]">
-          <div className="rounded-xl border border-white/30 bg-fundo-borda p-10 text-center">
+          <div className="rounded-xl border border-white/30 bg-white/10 p-10 text-center backdrop-blur-sm">
             <MarcaRTE tamanho={34} invertida />
             <p className="mt-3 text-sm text-white/85">
               Inteligência tributária para a reforma

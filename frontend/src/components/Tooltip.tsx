@@ -82,7 +82,7 @@ export const AjudaIcone: React.FC<{
   <Tooltip conteudo={conteudo} largura={largura}>
     <HelpCircle
       size={tamanho}
-      className="text-gray-500 transition-colors hover:text-blue-400"
+      className="text-tinta-suave transition-colors hover:text-marca-azul"
     />
   </Tooltip>
 );
@@ -104,7 +104,7 @@ export const MemoriaCalculo: React.FC<{
     {descricao && <p className="text-gray-300 leading-snug">{descricao}</p>}
 
     {linhas.length > 0 && (
-      <div className="space-y-1 border-t border-fundo-borda border-gray-700 pt-2">
+      <div className="space-y-1 border-t border-gray-700 pt-2">
         {linhas.map((linha, i) => (
           <div key={i} className="flex justify-between gap-3 text-gray-300">
             <span>{linha.rotulo}</span>
@@ -115,14 +115,14 @@ export const MemoriaCalculo: React.FC<{
     )}
 
     {resultado && (
-      <div className="flex justify-between gap-3 border-t border-fundo-borda border-gray-700 pt-2 font-semibold text-white">
+      <div className="flex justify-between gap-3 border-t border-gray-700 pt-2 font-semibold text-white">
         <span>{resultado.rotulo}</span>
         <span className="font-mono whitespace-nowrap">{resultado.valor}</span>
       </div>
     )}
 
     {origem && (
-      <p className="border-t border-fundo-borda border-gray-700 pt-2 text-xs text-gray-500 leading-snug">
+      <p className="border-t border-gray-700 pt-2 text-xs leading-snug text-gray-400">
         {origem}
       </p>
     )}
