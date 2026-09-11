@@ -192,7 +192,7 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
 
           <div className="mb-8 text-center">
             <div className="mb-1 flex items-center justify-center gap-2">
-              <MarcaRTE tamanho={22} />
+              <MarcaRTE tamanho={17} />
             </div>
             <p className="text-sm text-tinta-media">
               {tela === 'criar'
@@ -380,7 +380,7 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
           </div>
 
           <p className="mt-8 text-center text-xs text-tinta-media">
-            Validador da Reforma Tributária do Consumo — NF-e / NFC-e
+            Validador da Reforma Tributária do Consumo
           </p>
         </div>
       </div>
