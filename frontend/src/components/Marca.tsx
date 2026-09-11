@@ -30,6 +30,12 @@ export const MarcaRTE: React.FC<{
     style={{
       height: tamanho,
       width: 'auto',
+      // O preflight do Tailwind deixa toda img como display:block, e bloco
+      // ignora text-center — era por isso que a marca encostava à esquerda
+      // dentro dos cartões centralizados. Voltando a inline-block, ela se
+      // comporta como o texto ao redor, sem precisar de margem automática.
+      display: 'inline-block',
+      verticalAlign: 'middle',
       ...(invertida ? { filter: 'brightness(0) invert(1)' } : {}),
     }}
     className={className}
