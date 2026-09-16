@@ -64,8 +64,8 @@ export class NFEParserService {
       // assinada vem direto em <NFe>. Aceitamos as duas formas.
       const raiz = result.nfeProc || result.cteProc || result;
 
-      // NFS-e do padrão nacional: estrutura própria, parser próprio.
-      const ehNFSe = Boolean(raiz.NFSe?.infNFSe || raiz.infNFSe);
+      // NFS-e de qualquer município: estrutura própria, parser próprio.
+      const ehNFSe = this.ehNotaDeServico(raiz);
       if (ehNFSe) {
         if (modelo !== 'NFSE') {
           throw new Error(
@@ -77,7 +77,7 @@ export class NFEParserService {
 
       if (modelo === 'NFSE') {
         throw new Error(
-          'Você selecionou NFS-e, mas este arquivo não é uma NFS-e do padrão nacional.'
+          'Você selecionou NFS-e, mas este arquivo não é uma nota de serviço.'
         );
       }
 
@@ -224,65 +224,151 @@ export class NFEParserService {
    */
 
   /**
-   * NFS-e do padrão nacional (gov.br / ADN).
+   * Procura uma tag em qualquer profundidade do XML já convertido.
    *
-   * Estrutura completamente diferente da NF-e: não há <det> nem <ICMSTot>.
-   * O documento traz o prestador em <emit>, o tomador em <toma>, e os valores
-   * em <valores>, com a tributação municipal (ISS) e as retenções federais
-   * separadas.
+   * A NFS-e não tem um leiaute só. Cada município publica o seu, e um mesmo
+   * ZIP pode trazer vários: no lote de teste vieram o formato de Belo
+   * Horizonte (raiz NFSe, com ValoresNFSe e Servicos) e o de São Paulo (raiz
+   * NFe, com ChaveNFe e ValorISS). Amarrar o parser a um caminho fixo
+   * quebraria a cada município novo.
    *
-   * O mapeamento para NFeDocument aproveita os campos que já existem: o ISS
-   * vai para values.iss e as retenções federais para pis, cofins e irrf —
-   * são os mesmos tributos, só que retidos pelo tomador em vez de destacados
-   * pelo emitente. INSS e CSLL retidos entram no total de retenções, mas não
-   * têm campo próprio na estrutura atual.
-   *
-   * Os caminhos são buscados em mais de uma posição porque o XML autorizado
-   * e o XML apenas assinado aninham os mesmos dados em níveis diferentes.
+   * A comparação ignora maiúsculas porque os leiautes divergem até nisso
+   * (ValorIss contra ValorISS, CpfCnpjPrestador contra CPFCNPJPrestador).
    */
-  private async parseNFSe(raiz: any, tipo: DocumentType): Promise<NFeDocument> {
-    const nfse = this.no(raiz.NFSe?.infNFSe || raiz.infNFSe);
-    if (!nfse) {
-      throw new Error('Estrutura de NFS-e inválida: elemento infNFSe não encontrado.');
+  private buscar(no: any, nomes: string[], profundidade = 0): any {
+    if (!no || typeof no !== 'object' || profundidade > 8) return undefined;
+
+    const alvos = nomes.map(n => n.toLowerCase());
+
+    for (const [chave, valor] of Object.entries(no)) {
+      if (alvos.includes(chave.toLowerCase())) return valor;
     }
 
-    // A DPS é a declaração que originou a nota; parte dos dados só existe lá.
-    const dps = this.no(nfse.DPS?.infDPS || nfse.infDPS || {});
-    const prest = this.no(nfse.emit || dps.prest || {});
-    const toma = this.no(dps.toma || nfse.toma || {});
-    const serv = this.no(dps.serv || {});
+    for (const valor of Object.values(no)) {
+      const achado = this.buscar(valor, nomes, profundidade + 1);
+      if (achado !== undefined) return achado;
+    }
 
-    const valores = this.no(nfse.valores || dps.valores || {});
-    const vServPrest = this.no(valores.vServPrest || serv.vServPrest || {});
-    const trib = this.no(valores.trib || dps.valores?.trib || {});
-    const tribMun = this.no(trib.tribMun || {});
-    const tribFed = this.no(trib.tribFed || {});
+    return undefined;
+  }
 
-    // Valor do serviço: é a base da nota inteira.
-    const total =
-      this.numero(vServPrest.vServ) ||
-      this.numero(valores.vServ) ||
-      this.numero(nfse.valores?.vLiq);
+  /** Texto de uma tag procurada em qualquer nível. */
+  private textoDe(no: any, nomes: string[]): string {
+    return this.texto(this.buscar(no, nomes));
+  }
 
-    const baseCalculo = this.numero(tribMun.vBC) || total;
-    const aliquota = this.numero(tribMun.pAliq);
-    const iss = this.numero(tribMun.vISSQN) || this.numero(tribMun.vISS);
+  /** Número de uma tag procurada em qualquer nível. */
+  private numeroDe(no: any, nomes: string[]): number {
+    return this.numero(this.buscar(no, nomes));
+  }
 
-    // Retenções federais feitas pelo tomador.
-    const pis = this.numero(tribFed.vRetPIS);
-    const cofins = this.numero(tribFed.vRetCOFINS) || this.numero(tribFed.vRetCofins);
-    const irrf = this.numero(tribFed.vRetIRRF);
-    const csll = this.numero(tribFed.vRetCSLL);
-    const inss = this.numero(tribFed.vRetCP) || this.numero(tribFed.vRetINSS);
+  /**
+   * Primeiro valor maior que zero entre várias tags candidatas.
+   *
+   * Necessário porque a tag existir não significa que ela tenha valor: São
+   * Paulo grava ValorLiquidoNfse igual a 0,00 nas notas com ISS retido ou
+   * imunidade, e o valor do serviço fica só na BaseCalculo. Pegar a primeira
+   * tag presente descartaria a nota inteira.
+   */
+  private primeiroNumeroDe(no: any, nomes: string[]): number {
+    for (const nome of nomes) {
+      const valor = this.numero(this.buscar(no, [nome]));
+      if (valor > 0) return valor;
+    }
+    return 0;
+  }
 
-    const cnpjEmitente =
-      this.texto(prest.CNPJ) || this.texto(prest.CPF) || this.texto(nfse.emit?.CNPJ) || 'N/A';
-    const cnpjDestino = this.texto(toma.CNPJ) || this.texto(toma.CPF) || 'N/A';
+  /**
+   * CNPJ do prestador ou do tomador.
+   *
+   * Em São Paulo o documento vem aninhado (<CPFCNPJPrestador><CNPJ>), em Belo
+   * Horizonte vem direto no texto da tag. Os dois casos caem aqui.
+   */
+  private documentoDe(no: any, nomes: string[]): string {
+    const bruto = this.buscar(no, nomes);
+    if (!bruto) return 'N/A';
+    if (typeof bruto === 'string') return bruto.replace(/\D/g, '') || 'N/A';
+    const aninhado = this.texto(this.no(bruto)?.CNPJ) || this.texto(this.no(bruto)?.CPF);
+    return aninhado.replace(/\D/g, '') || 'N/A';
+  }
+
+  /**
+   * Reconhece se o XML é uma NFS-e, qualquer que seja o município.
+   *
+   * O formato de São Paulo usa <NFe> como raiz, o mesmo nome da nota de
+   * mercadoria. A distinção é feita pela presença de marcas que só existem em
+   * nota de serviço e pela ausência de infNFe.
+   */
+  private ehNotaDeServico(raiz: any): boolean {
+    if (raiz.NFSe || raiz.infNFSe || raiz.CompNfse || raiz.Nfse) return true;
+    if (raiz.NFe?.infNFe || raiz.infNFe) return false;
+
+    const marcas = ['ValorServicos', 'ValoresNFSe', 'Servicos', 'CodigoServico', 'ChaveNFe'];
+    return marcas.some(m => this.buscar(raiz, [m]) !== undefined);
+  }
+
+  /**
+   * NFS-e municipal ou do padrão nacional.
+   *
+   * Os valores são lidos por nome de tag, aceitando as variações conhecidas.
+   * A alíquota é recalculada a partir do ISS e da base sempre que possível,
+   * em vez de confiar na declarada: São Paulo grava 0.02 para dois por cento
+   * e Belo Horizonte grava 3.5 para três e meio. Dividir o imposto pela base
+   * resolve os dois sem precisar adivinhar a escala.
+   */
+  private async parseNFSe(raiz: any, tipo: DocumentType): Promise<NFeDocument> {
+    const total = this.primeiroNumeroDe(raiz, [
+      'ValorServicos',
+      'vServ',
+      'ValorLiquidoNfse',
+      'vLiq',
+      // Último recurso: em nota com ISS retido ou imunidade, é a única tag
+      // que carrega o valor do serviço.
+      'BaseCalculo',
+    ]);
+
+    if (total <= 0) {
+      throw new Error(
+        'NFS-e sem valor de serviço reconhecível. O leiaute deste município ' +
+          'ainda não é suportado.'
+      );
+    }
+
+    const iss = this.primeiroNumeroDe(raiz, ['ValorIss', 'ValorISS', 'vISSQN', 'vISS']);
+    const deducoes = this.numeroDe(raiz, ['ValorDeducoes']);
+    const baseDeclarada = this.primeiroNumeroDe(raiz, ['BaseCalculo', 'vBC']);
+    const baseCalculo = baseDeclarada > 0 ? baseDeclarada : Math.max(total - deducoes, 0);
+
+    // Alíquota efetiva, imune à diferença de escala entre municípios.
+    const aliquotaDeclarada = this.primeiroNumeroDe(raiz, [
+      'AliquotaServicos', 'Aliquota', 'pAliq',
+    ]);
+    const aliquota =
+      baseCalculo > 0 && iss > 0
+        ? (iss / baseCalculo) * 100
+        : aliquotaDeclarada <= 1
+          ? aliquotaDeclarada * 100
+          : aliquotaDeclarada;
+
+    // Retenções feitas pelo tomador.
+    const pis = this.numeroDe(raiz, ['ValorPis', 'ValorPIS', 'vRetPIS']);
+    const cofins = this.numeroDe(raiz, ['ValorCofins', 'ValorCOFINS', 'vRetCOFINS']);
+    const irrf = this.numeroDe(raiz, ['ValorIr', 'ValorIR', 'ValorIRRF', 'vRetIRRF']);
+    const csll = this.numeroDe(raiz, ['ValorCsll', 'ValorCSLL', 'vRetCSLL']);
+    const inss = this.numeroDe(raiz, ['ValorInss', 'ValorINSS', 'vRetCP']);
+
+    const cnpjEmitente = this.documentoDe(raiz, [
+      'CpfCnpjPrestador', 'CPFCNPJPrestador', 'CnpjPrestador',
+    ]);
+    const cnpjDestino = this.documentoDe(raiz, [
+      'CpfCnpjTomador', 'CPFCNPJTomador', 'CnpjTomador',
+    ]);
 
     const dataEmissao =
-      this.texto(nfse.dhProc) || this.texto(dps.dhEmi) || new Date().toISOString();
+      this.textoDe(raiz, ['DataEmissaoNfse', 'DataEmissaoNFe', 'dhProc', 'dhEmi']) ||
+      new Date().toISOString();
 
-    const regimeTributario = this.regimeDaNFSe(dps, prest);
+    const regimeTributario = this.regimeDaNFSe(raiz);
 
     const valoresDoc = {
       baseCalculo,
@@ -294,8 +380,8 @@ export class NFEParserService {
       cofins,
       irrf,
       aliquota,
-      cbs: 0,
-      ibs: 0,
+      cbs: this.numeroDe(this.buscar(raiz, ['CBS']) ?? {}, ['Vlr']),
+      ibs: this.numeroDe(this.buscar(raiz, ['IBS']) ?? {}, ['Vlr']),
       total,
     };
 
@@ -305,22 +391,31 @@ export class NFEParserService {
       new Date(dataEmissao).getFullYear()
     );
 
-    // O ISS entra no motor de divergências como qualquer outro tributo; as
-    // retenções federais não, porque não são tributo do prestador e sim
-    // antecipação recolhida pelo tomador.
+    // Só o ISS entra no confronto de divergências: as retenções federais não
+    // são tributo do prestador, e sim antecipação recolhida pelo tomador.
     const divergencias = await this.calcularDivergencias(
       { icms: 0, icmsST: 0, ipi: 0, iss, pis: 0, cofins: 0, irrf: 0 },
       regimeTributario
     );
+
+    const issRetido = this.textoDe(raiz, ['IssRetido', 'ISSRetido']).toLowerCase();
+    if (issRetido === '1' || issRetido === 'true') {
+      validacoes.push({
+        campo: 'ISS',
+        situacao: 'informativo',
+        mensagem:
+          'ISS retido na fonte: o recolhimento é do tomador, não do prestador.',
+      } as any);
+    }
 
     if (csll > 0 || inss > 0) {
       validacoes.push({
         campo: 'Retenções',
         situacao: 'informativo',
         mensagem:
-          `Retenções de CSLL (${csll.toFixed(2)}) e INSS (${inss.toFixed(2)}) ` +
-          'identificadas na nota. Elas não entram no total de tributos, que ' +
-          'considera apenas ISS e as retenções de PIS, COFINS e IRRF.',
+          `CSLL retida de ${csll.toFixed(2)} e INSS retido de ${inss.toFixed(2)} ` +
+          'identificados. Não entram no total de tributos, que considera ISS e ' +
+          'as retenções de PIS, COFINS e IRRF.',
       } as any);
     }
 
@@ -328,12 +423,16 @@ export class NFEParserService {
       id: uuidv4(),
       modelo: 'NFSE',
       tipo,
-      chaveNFe: this.texto(nfse.chNFSe) || this.texto(nfse.nNFSe) || 'N/A',
+      chaveNFe:
+        this.textoDe(raiz, ['CodigoVerificacao', 'chNFSe']) ||
+        this.textoDe(raiz, ['NumeroNfse', 'NumeroNFe', 'nNFSe']) ||
+        'N/A',
       dataEmissao,
       cnpjEmitente,
-      nomeEmitente: this.texto(prest.xNome) || this.texto(prest.xFant) || 'N/A',
+      nomeEmitente: this.textoDe(raiz, ['RazaoSocialPrestador', 'xNome']) || 'N/A',
       cnpjDestino,
-      nomeDestino: this.texto(toma.xNome) || 'Tomador não identificado',
+      nomeDestino:
+        this.textoDe(raiz, ['RazaoSocialTomador']) || 'Tomador não identificado',
       regimeTributario,
       values: valoresDoc,
       validacoes,
@@ -344,21 +443,17 @@ export class NFEParserService {
   /**
    * Regime do prestador na NFS-e.
    *
-   * O padrão nacional declara isso explicitamente em regTrib/opSimpNac, o que
-   * é mais confiável que inferir pelos tributos destacados como se faz na
-   * NF-e: 1 = não optante, 2 = MEI, 3 = ME/EPP do Simples.
+   * Alguns leiautes declaram explicitamente (opSimpNac no padrão nacional,
+   * OpcaoSimples em São Paulo). Sem declaração, a alíquota de ISS não permite
+   * distinguir regime, então fica o presumido, que é a hipótese mais comum
+   * para prestador de serviço fora do Simples.
    */
-  private regimeDaNFSe(dps: any, prest: any): RegimeTributario {
-    const regTrib = this.no(dps.regTrib || prest.regTrib || {});
-    const opSimpNac = this.texto(regTrib.opSimpNac);
-
+  private regimeDaNFSe(raiz: any): RegimeTributario {
+    const opSimpNac = this.textoDe(raiz, ['opSimpNac']);
     if (opSimpNac === '2' || opSimpNac === '3') return 'Simples-Nacional';
-    if (opSimpNac === '1') {
-      // Sem informação melhor, presumido é a hipótese mais provável para
-      // prestador de serviço fora do Simples.
-      const regEspTrib = this.texto(regTrib.regEspTrib);
-      return regEspTrib === '1' ? 'Lucro-Real' : 'Lucro-Presumido';
-    }
+
+    const opcaoSimples = this.textoDe(raiz, ['OpcaoSimples']);
+    if (opcaoSimples === '1') return 'Simples-Nacional';
 
     return 'Lucro-Presumido';
   }

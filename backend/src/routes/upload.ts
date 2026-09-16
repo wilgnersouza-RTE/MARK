@@ -116,12 +116,16 @@ router.post('/nfe', authenticate, upload.single('file'), async (req: Request, re
       try {
         const conteudoXML = await file.async('text');
 
-        // Verificar se XML contém conteúdo relevante (tags de valor)
-        if (
-          !conteudoXML.includes('vBC') &&
-          !conteudoXML.includes('vICMS') &&
-          !conteudoXML.includes('vNF')
-        ) {
+        // Verificar se o XML contém alguma tag de valor reconhecível.
+        // As três primeiras são da NF-e; as demais, das notas de serviço —
+        // cada município nomeia a sua de um jeito, e sem elas aqui a NFS-e
+        // era barrada antes mesmo de chegar ao parser.
+        const marcasDeValor = [
+          'vBC', 'vICMS', 'vNF',
+          'ValorServicos', 'ValoresNFSe', 'vServ', 'ValorLiquidoNfse', 'ValorIss', 'ValorISS',
+        ];
+
+        if (!marcasDeValor.some(m => conteudoXML.includes(m))) {
           erros.push({
             nomeArquivo,
             erro: 'XML não contém valores de nota fiscal',
