@@ -69,6 +69,21 @@ export interface NFeValues {
   cbs: number;
   ibs: number;
   total: number;
+  /**
+   * Parcela dos valores acima que foi retida pelo tomador.
+   *
+   * Os campos iss, pis, cofins e irrf continuam guardando o total, para que
+   * as somas existentes não mudem de significado. Este bloco diz quanto
+   * daquele total não é recolhido pelo prestador — na NFS-e as retenções
+   * federais são sempre do tomador, e o ISS é dele quando a nota traz
+   * IssRetido.
+   */
+  retido?: {
+    iss: number;
+    pis: number;
+    cofins: number;
+    irrf: number;
+  };
   Icms?: number;
   ISS?: number;
   Pis?: number;
@@ -158,6 +173,10 @@ export interface ResumoGeral {
   totalPIS: number;
   totalCOFINS: number;
   totalIRRF: number;
+  /** Parcela do total que é retida pelo tomador */
+  totalRetidoTomador: number;
+  /** Parcela do total recolhida pelo próprio emitente ou prestador */
+  totalDoPrestador: number;
   documentosConformes: number;
   documentosComDivergencias: number;
   percentualConformidade: number;

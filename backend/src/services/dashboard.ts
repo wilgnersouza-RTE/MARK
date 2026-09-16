@@ -42,6 +42,8 @@ export class DashboardService {
     let totalValor = 0;
     let totalICMS = 0;
     let totalICMSST = 0;
+    // Soma das parcelas retidas pelo tomador, em qualquer tributo.
+    let totalRetidoTomador = 0;
     let totalIPI = 0;
     let totalISS = 0;
     let totalPIS = 0;
@@ -53,6 +55,11 @@ export class DashboardService {
       totalValor += doc.values.total;
       totalICMS += doc.values.icms;
       totalICMSST += doc.values.icmsST;
+
+      const ret = doc.values.retido;
+      if (ret) {
+        totalRetidoTomador += ret.iss + ret.pis + ret.cofins + ret.irrf;
+      }
       totalIPI += doc.values.ipi;
       totalISS += doc.values.iss;
       totalPIS += doc.values.pis;
@@ -82,6 +89,9 @@ export class DashboardService {
       totalPIS,
       totalCOFINS,
       totalIRRF,
+      totalRetidoTomador,
+      // O que sobra é recolhido por quem emitiu a nota.
+      totalDoPrestador: totalTributos - totalRetidoTomador,
       documentosConformes,
       documentosComDivergencias: documentos.length - documentosConformes,
       percentualConformidade,
@@ -343,6 +353,8 @@ export class DashboardService {
         totalPIS: 0,
         totalCOFINS: 0,
         totalIRRF: 0,
+        totalRetidoTomador: 0,
+        totalDoPrestador: 0,
         documentosConformes: 0,
         documentosComDivergencias: 0,
         percentualConformidade: 0,

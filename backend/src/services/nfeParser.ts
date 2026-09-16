@@ -168,7 +168,8 @@ export class NFEParserService {
           cofins,
           irrf,
         },
-        regimeTributario
+        regimeTributario,
+        baseCalculo
       );
 
       const documento: NFeDocument = {
@@ -370,6 +371,11 @@ export class NFEParserService {
 
     const regimeTributario = this.regimeDaNFSe(raiz);
 
+    // Na NFS-e as retenções federais são sempre do tomador. O ISS só entra
+    // aqui quando a nota declara IssRetido.
+    const marcaIssRetido = this.textoDe(raiz, ['IssRetido', 'ISSRetido']).toLowerCase();
+    const issEhRetido = marcaIssRetido === '1' || marcaIssRetido === 'true';
+
     const valoresDoc = {
       baseCalculo,
       icms: 0,
@@ -383,6 +389,12 @@ export class NFEParserService {
       cbs: this.numeroDe(this.buscar(raiz, ['CBS']) ?? {}, ['Vlr']),
       ibs: this.numeroDe(this.buscar(raiz, ['IBS']) ?? {}, ['Vlr']),
       total,
+      retido: {
+        iss: issEhRetido ? iss : 0,
+        pis,
+        cofins,
+        irrf,
+      },
     };
 
     const validacoes = await this.validarConformeReforma(
@@ -395,11 +407,11 @@ export class NFEParserService {
     // são tributo do prestador, e sim antecipação recolhida pelo tomador.
     const divergencias = await this.calcularDivergencias(
       { icms: 0, icmsST: 0, ipi: 0, iss, pis: 0, cofins: 0, irrf: 0 },
-      regimeTributario
+      regimeTributario,
+      baseCalculo
     );
 
-    const issRetido = this.textoDe(raiz, ['IssRetido', 'ISSRetido']).toLowerCase();
-    if (issRetido === '1' || issRetido === 'true') {
+    if (issEhRetido) {
       validacoes.push({
         campo: 'ISS',
         situacao: 'informativo',
@@ -565,7 +577,9 @@ export class NFEParserService {
       cofins: number;
       irrf: number;
     },
-    regime: RegimeTributario
+    regime: RegimeTributario,
+    /** Base sobre a qual a alíquota esperada é aplicada. */
+    baseCalculo: number
   ): Promise<Divergencia[]> {
     const divergencias: Divergencia[] = [];
     const anos = [2024, 2025, 2026, 2027];
@@ -575,17 +589,17 @@ export class NFEParserService {
       rotulo: string;
       chave: string;
       atual: number;
-      tolerancia: number;
-      /** o ICMS é cadastrado em fração e precisa virar percentual */
-      emFracao?: boolean;
     }> = [
-      { rotulo: 'ICMS', chave: 'icms', atual: tributos.icms, tolerancia: 1, emFracao: true },
-      { rotulo: 'ICMS-ST', chave: 'icmsST', atual: tributos.icmsST, tolerancia: 1, emFracao: true },
-      { rotulo: 'IPI', chave: 'ipi', atual: tributos.ipi, tolerancia: 0.5 },
-      { rotulo: 'ISS', chave: 'iss', atual: tributos.iss, tolerancia: 1 },
-      { rotulo: 'PIS', chave: 'pis', atual: tributos.pis, tolerancia: 0.1 },
-      { rotulo: 'COFINS', chave: 'cofins', atual: tributos.cofins, tolerancia: 0.1 },
+      { rotulo: 'ICMS', chave: 'icms', atual: tributos.icms },
+      { rotulo: 'ICMS-ST', chave: 'icmsST', atual: tributos.icmsST },
+      { rotulo: 'IPI', chave: 'ipi', atual: tributos.ipi },
+      { rotulo: 'ISS', chave: 'iss', atual: tributos.iss },
+      { rotulo: 'PIS', chave: 'pis', atual: tributos.pis },
+      { rotulo: 'COFINS', chave: 'cofins', atual: tributos.cofins },
     ];
+
+    // Diferença abaixo de um real é arredondamento, não divergência.
+    const TOLERANCIA_EM_REAIS = 1;
 
     for (const ano of anos) {
       const regras = await taxRulesService.getRegrasPorAno(ano);
@@ -597,21 +611,30 @@ export class NFEParserService {
         const regra = (regras as unknown as Record<string, unknown>)[c.chave];
         if (!regra || typeof regra !== 'object') continue;
 
-        const base = this.getAliquotaPorRegime(
+        // Todas as alíquotas de tax-rules.json estão em percentual
+        // (ICMS 18.0, PIS 1.65). Um comentário antigo no código dizia que o
+        // ICMS vinha em fração e o multiplicava por cem, o que gerava
+        // alíquota de 1800% — o previsto saía cem vezes maior que o devido.
+        const aliquota = this.getAliquotaPorRegime(
           regra as Record<string, number | string | undefined>,
           regime
         );
-        const previsto = c.emFracao ? base * 100 : base;
+
+        // O previsto é um VALOR, não uma alíquota. Comparar o imposto
+        // destacado contra o percentual esperado produzia diferenças
+        // absurdas — R$ 8.600 contra 3,75, com percentual na casa das
+        // centenas de milhares.
+        const previsto = (baseCalculo * aliquota) / 100;
         const diferenca = previsto - c.atual;
 
-        if (Math.abs(diferenca) > c.tolerancia) {
+        if (previsto > 0 && Math.abs(diferenca) > TOLERANCIA_EM_REAIS) {
           divergencias.push({
             tributo: c.rotulo,
             ano,
             valorAtual: c.atual,
             valorPrevisto: previsto,
             diferenca,
-            percentual: previsto === 0 ? 0 : (diferenca / previsto) * 100,
+            percentual: (diferenca / previsto) * 100,
           });
         }
       }

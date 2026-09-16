@@ -58,6 +58,8 @@ interface ResumoGeral {
   totalPIS: number;
   totalCOFINS: number;
   totalIRRF: number;
+  totalRetidoTomador: number;
+  totalDoPrestador: number;
   documentosConformes: number;
   documentosComDivergencias: number;
   percentualConformidade: number;
@@ -689,11 +691,23 @@ const DashboardContent: React.FC<{
           label="Total Tributos"
           value={formatarMoeda(resumo.totalTributos)}
           color="border-orange-500"
+          complemento={
+            // Quem recolhe cada parcela é pessoa diferente. Sem a quebra, o
+            // número sozinho sugere que tudo é do emitente da nota.
+            resumo.totalRetidoTomador > 0 ? (
+              <p className="text-[11px] leading-snug text-tinta-media">
+                {formatarMoeda(resumo.totalDoPrestador)} do prestador ·{' '}
+                {formatarMoeda(resumo.totalRetidoTomador)} retidos pelo tomador
+              </p>
+            ) : undefined
+          }
           memoria={
             <MemoriaCalculo
               titulo="Total de Tributos"
-              descricao="Soma de todos os tributos destacados nas notas."
+              descricao="Soma de todos os tributos destacados nas notas, independentemente de quem recolhe."
               linhas={[
+                { rotulo: 'Do prestador', valor: formatarMoeda(resumo.totalDoPrestador) },
+                { rotulo: 'Retido pelo tomador', valor: formatarMoeda(resumo.totalRetidoTomador) },
                 { rotulo: 'ICMS', valor: formatarMoeda(resumo.totalICMS) },
                 { rotulo: 'ICMS-ST', valor: formatarMoeda(resumo.totalICMSST) },
                 { rotulo: 'IPI', valor: formatarMoeda(resumo.totalIPI) },

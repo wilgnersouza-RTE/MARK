@@ -3,7 +3,9 @@ import axios from 'axios';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Area, AreaChart,
 } from 'recharts';
-import { AlertTriangle, TrendingUp, TrendingDown, Loader2 } from 'lucide-react';
+import {
+  AlertTriangle, TrendingUp, TrendingDown, Loader2, Store, CornerUpLeft,
+} from 'lucide-react';
 import { AjudaIcone, MemoriaCalculo } from './Tooltip';
 import { API_URL } from '../utils/api';
 import {
@@ -30,6 +32,13 @@ interface Documento {
     cofins: number;
     irrf: number;
     total: number;
+    /** Parcela dos valores acima retida pelo tomador */
+    retido?: {
+      iss: number;
+      pis: number;
+      cofins: number;
+      irrf: number;
+    };
   };
   divergencias: any[];
 }
@@ -159,6 +168,59 @@ const Alerta: React.FC<{ titulo: string; detalhe: string; cor: 'vermelho' | 'amb
     <div className="min-w-0">
       <p className="text-xs font-semibold leading-snug text-tinta-forte">{titulo}</p>
       <p className="mt-0.5 text-[11px] leading-snug text-tinta-fraca">{detalhe}</p>
+    </div>
+  </div>
+);
+
+
+/**
+ * Barras de participação de um grupo de tributos.
+ *
+ * O percentual é sempre sobre o total geral, e não sobre o subtotal do
+ * grupo: senão as duas listas somariam cem por cento cada uma e a
+ * comparação entre elas ficaria impossível.
+ */
+const BarrasDeTributo: React.FC<{
+  lista: Array<{ nome: string; valor: number }>;
+  maior: number;
+  total: number;
+  titulo: string;
+  subtotal: number;
+  icone: React.ReactNode;
+  /** Grupo secundário usa tom mais claro, para distinguir também em impressão */
+  secundaria?: boolean;
+  className?: string;
+}> = ({ lista, maior, total, titulo, subtotal, icone, secundaria, className = '' }) => (
+  <div className={className}>
+    <div className="mb-2 flex items-center gap-2">
+      <span className="text-tinta-suave">{icone}</span>
+      <span className="text-xs font-semibold text-tinta-forte">{titulo}</span>
+      <span className="text-[11px] text-tinta-suave">
+        {formatarMoeda(subtotal)} · {formatarPercentual(total > 0 ? (subtotal / total) * 100 : 0, 0)}
+      </span>
+    </div>
+
+    <div className="space-y-2">
+      {lista.map(t => (
+        <div key={t.nome} className="flex items-center gap-3">
+          <span className="w-16 shrink-0 text-[11px] font-medium text-rotulo">{t.nome}</span>
+          <div className="h-5 flex-1 overflow-hidden rounded bg-fundo-eleva">
+            <div
+              className={`flex h-5 items-center justify-end rounded px-2 ${
+                secundaria ? 'bg-marca-ciano' : 'bg-marca-azul'
+              }`}
+              style={{ width: `${Math.max(6, (t.valor / maior) * 100)}%` }}
+            >
+              <span className="text-[10px] font-semibold text-white">
+                {formatarPercentual(total > 0 ? (t.valor / total) * 100 : 0, 1)}
+              </span>
+            </div>
+          </div>
+          <span className="w-24 shrink-0 text-right font-mono text-[11px] text-tinta-media">
+            {formatarMoedaCompacta(t.valor)}
+          </span>
+        </div>
+      ))}
     </div>
   </div>
 );
@@ -322,18 +384,40 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
 
     const fornecedores = Array.from(porFornecedor.values()).sort((a, b) => b.valor - a.valor);
 
-    // Tributos, para as barras horizontais
-    const tributosLista = [
+    // Tributos, para as barras horizontais.
+    //
+    // A lista é separada por quem recolhe: o que o emitente ou prestador
+    // apura vai de um lado, o que o tomador retém na fonte vai do outro.
+    // Somar os dois numa lista só sugere que o dinheiro todo é do mesmo
+    // contribuinte, o que não é verdade em nota de serviço.
+    const retido = (escolher: (r: { iss: number; pis: number; cofins: number; irrf: number }) => number) =>
+      soma(d => (d.values.retido ? escolher(d.values.retido) : 0));
+
+    const totalRetido =
+      retido(r => r.iss) + retido(r => r.pis) + retido(r => r.cofins) + retido(r => r.irrf);
+
+    const tributosDoPrestador = [
       { nome: 'ICMS', valor: soma(d => d.values.icms) },
-      { nome: 'COFINS', valor: soma(d => d.values.cofins) },
-      { nome: 'PIS', valor: soma(d => d.values.pis) },
       { nome: 'ICMS-ST', valor: soma(d => d.values.icmsST) },
       { nome: 'IPI', valor: soma(d => d.values.ipi) },
-      { nome: 'ISS', valor: soma(d => d.values.iss) },
-      { nome: 'IRRF', valor: soma(d => d.values.irrf) },
+      { nome: 'ISS', valor: soma(d => d.values.iss) - retido(r => r.iss) },
+      { nome: 'PIS', valor: soma(d => d.values.pis) - retido(r => r.pis) },
+      { nome: 'COFINS', valor: soma(d => d.values.cofins) - retido(r => r.cofins) },
+      { nome: 'IRRF', valor: soma(d => d.values.irrf) - retido(r => r.irrf) },
     ]
-      .filter(t => t.valor > 0)
+      .filter(t => t.valor > 0.005)
       .sort((a, b) => b.valor - a.valor);
+
+    const tributosRetidos = [
+      { nome: 'ISS', valor: retido(r => r.iss) },
+      { nome: 'COFINS', valor: retido(r => r.cofins) },
+      { nome: 'PIS', valor: retido(r => r.pis) },
+      { nome: 'IRRF', valor: retido(r => r.irrf) },
+    ]
+      .filter(t => t.valor > 0.005)
+      .sort((a, b) => b.valor - a.valor);
+
+    const tributosLista = [...tributosDoPrestador, ...tributosRetidos];
 
     // Regimes
     const porRegime = new Map<string, { valor: number; qtd: number; cnpjs: Set<string> }>();
@@ -357,6 +441,10 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
       variacaoTributos: variacao('tributos'),
       fornecedores,
       tributosLista,
+      tributosDoPrestador,
+      tributosRetidos,
+      totalRetido,
+      totalDoPrestador: Math.max(tributos - totalRetido, 0),
       regimes: Array.from(porRegime.entries()).map(([regime, v]) => ({
         regime,
         valor: v.valor,
@@ -703,33 +791,39 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
                 { rotulo: 'Fórmula', valor: 'tributo ÷ total destacado' },
                 { rotulo: 'Total destacado', valor: formatarMoeda(dados.tributos) },
               ]}
-              origem="Considera ICMS, ICMS-ST, IPI, ISS, PIS, COFINS e IRRF."
+              origem="Separado por quem recolhe: o prestador apura o seu; o retido é antecipação do tomador."
             />
           }
         >
-          <div className="space-y-2">
-            {dados.tributosLista.map(t => (
-              <div key={t.nome} className="flex items-center gap-3">
-                <span className="w-16 shrink-0 text-[11px] font-medium text-rotulo">{t.nome}</span>
-                <div className="h-5 flex-1 overflow-hidden rounded bg-fundo-eleva">
-                  <div
-                    className="flex h-5 items-center justify-end rounded bg-gradient-to-r from-marca-azul to-marca-ciano px-2"
-                    style={{ width: `${Math.max(6, (t.valor / maiorTributo) * 100)}%` }}
-                  >
-                    <span className="text-[10px] font-semibold text-white">
-                      {formatarPercentual(
-                        dados.tributos > 0 ? (t.valor / dados.tributos) * 100 : 0,
-                        1
-                      )}
-                    </span>
-                  </div>
-                </div>
-                <span className="w-24 shrink-0 text-right font-mono text-[11px] text-tinta-media">
-                  {formatarMoedaCompacta(t.valor)}
-                </span>
-              </div>
-            ))}
-          </div>
+          <BarrasDeTributo
+            lista={dados.tributosDoPrestador}
+            maior={maiorTributo}
+            total={dados.tributos}
+            titulo="Recolhido pelo prestador"
+            subtotal={dados.totalDoPrestador}
+            icone={<Store size={14} />}
+          />
+
+          {dados.tributosRetidos.length > 0 && (
+            <>
+              <BarrasDeTributo
+                lista={dados.tributosRetidos}
+                maior={maiorTributo}
+                total={dados.tributos}
+                titulo="Retido pelo tomador"
+                subtotal={dados.totalRetido}
+                icone={<CornerUpLeft size={14} />}
+                secundaria
+                className="mt-4 border-t border-fundo-borda pt-3"
+              />
+
+              <p className="mt-3 border-t border-fundo-borda pt-3 text-[11px] leading-snug text-tinta-suave">
+                O que o prestador recolhe entra na apuração dele. O retido é
+                antecipação recolhida pelo tomador, e por isso não é confrontado na
+                aba Divergências, que compara a alíquota do regime do prestador.
+              </p>
+            </>
+          )}
         </Painel>
 
         <Painel
