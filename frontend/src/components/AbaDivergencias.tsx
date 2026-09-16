@@ -88,6 +88,21 @@ export const AbaDivergencias: React.FC<{
   const [tributo, setTributo] = useState('todos');
   const [ano, setAno] = useState('todos');
   const [sentido, setSentido] = useState('todos');
+
+  /*
+   * Trocar o ano de referência troca o conjunto inteiro de divergências, e
+   * com ele a lista de tributos e de anos disponíveis. Os filtros ficavam
+   * apontando para valores que só existiam no conjunto anterior — filtrar
+   * por COFINS em 2027 e voltar para a legislação atual, onde a NFS-e só
+   * tem ISS, zerava a tela mostrando "0 de 120" com tudo aparentemente em
+   * "Todos".
+   */
+  useEffect(() => {
+    setTributo('todos');
+    setAno('todos');
+    setSentido('todos');
+    setBusca('');
+  }, [anoReferencia]);
   const [limite, setLimite] = useState(50);
   const [ordem, setOrdem] = useState<{ coluna: Coluna; asc: boolean }>({
     coluna: 'diferenca',
@@ -109,8 +124,14 @@ export const AbaDivergencias: React.FC<{
     const termo = busca.trim().toLowerCase();
 
     const resultado = base.filter(d => {
-      if (tributo !== 'todos' && d.tributo !== tributo) return false;
-      if (ano !== 'todos' && String(d.ano) !== ano) return false;
+      // Um filtro que aponta para valor inexistente no conjunto atual é
+      // ignorado em vez de zerar a tela.
+      if (tributo !== 'todos' && tributos.includes(tributo) && d.tributo !== tributo) {
+        return false;
+      }
+      if (ano !== 'todos' && anos.includes(Number(ano)) && String(d.ano) !== ano) {
+        return false;
+      }
       if (sentido === 'maior' && d.diferenca <= 0) return false;
       if (sentido === 'menor' && d.diferenca >= 0) return false;
 
@@ -141,7 +162,7 @@ export const AbaDivergencias: React.FC<{
     });
 
     return resultado;
-  }, [base, busca, tributo, ano, sentido, ordem]);
+  }, [base, busca, tributo, ano, sentido, ordem, tributos, anos]);
 
   const visiveis = filtradas.slice(0, limite);
   const temFiltro = busca !== '' || tributo !== 'todos' || ano !== 'todos' || sentido !== 'todos';
