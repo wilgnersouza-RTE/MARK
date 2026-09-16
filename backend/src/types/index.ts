@@ -42,8 +42,13 @@ export interface AuthResponse {
 }
 
 // ==================== NF-e e Modelos ====================
-/** 55 = NF-e, 65 = NFC-e, 57 = CT-e */
-export type NFeModel = 55 | 65 | 57;
+/**
+ * 55 = NF-e, 65 = NFC-e, 57 = CT-e, 'NFSE' = NFS-e do padrão nacional.
+ *
+ * A NFS-e não tem código numérico de modelo porque não é documento estadual;
+ * o padrão nacional a identifica pela própria estrutura do XML.
+ */
+export type NFeModel = 55 | 65 | 57 | 'NFSE';
 export type DocumentType = 'Entrada' | 'Saída' | 'entrada' | 'saida';
 export type RegimeTributario = 'Regime-Regular' | 'Simples-Nacional' | 'Lucro-Real' | 'Lucro-Presumido';
 

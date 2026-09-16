@@ -63,6 +63,24 @@ export class NFEParserService {
       // A nota autorizada pela SEFAZ vem embrulhada em <nfeProc>; a nota apenas
       // assinada vem direto em <NFe>. Aceitamos as duas formas.
       const raiz = result.nfeProc || result.cteProc || result;
+
+      // NFS-e do padrão nacional: estrutura própria, parser próprio.
+      const ehNFSe = Boolean(raiz.NFSe?.infNFSe || raiz.infNFSe);
+      if (ehNFSe) {
+        if (modelo !== 'NFSE') {
+          throw new Error(
+            `Este arquivo é uma NFS-e. Você selecionou ${rotuloModelo(modelo)}.`
+          );
+        }
+        return this.parseNFSe(raiz, tipo);
+      }
+
+      if (modelo === 'NFSE') {
+        throw new Error(
+          'Você selecionou NFS-e, mas este arquivo não é uma NFS-e do padrão nacional.'
+        );
+      }
+
       const nfe = raiz.NFe?.infNFe || raiz.infNFe;
 
       // O ZIP pode misturar tipos de documento. Reconhecer o CT-e pela raiz
@@ -204,6 +222,147 @@ export class NFEParserService {
   /**
    * Inferir regime tributário baseado nos tributos
    */
+
+  /**
+   * NFS-e do padrão nacional (gov.br / ADN).
+   *
+   * Estrutura completamente diferente da NF-e: não há <det> nem <ICMSTot>.
+   * O documento traz o prestador em <emit>, o tomador em <toma>, e os valores
+   * em <valores>, com a tributação municipal (ISS) e as retenções federais
+   * separadas.
+   *
+   * O mapeamento para NFeDocument aproveita os campos que já existem: o ISS
+   * vai para values.iss e as retenções federais para pis, cofins e irrf —
+   * são os mesmos tributos, só que retidos pelo tomador em vez de destacados
+   * pelo emitente. INSS e CSLL retidos entram no total de retenções, mas não
+   * têm campo próprio na estrutura atual.
+   *
+   * Os caminhos são buscados em mais de uma posição porque o XML autorizado
+   * e o XML apenas assinado aninham os mesmos dados em níveis diferentes.
+   */
+  private async parseNFSe(raiz: any, tipo: DocumentType): Promise<NFeDocument> {
+    const nfse = this.no(raiz.NFSe?.infNFSe || raiz.infNFSe);
+    if (!nfse) {
+      throw new Error('Estrutura de NFS-e inválida: elemento infNFSe não encontrado.');
+    }
+
+    // A DPS é a declaração que originou a nota; parte dos dados só existe lá.
+    const dps = this.no(nfse.DPS?.infDPS || nfse.infDPS || {});
+    const prest = this.no(nfse.emit || dps.prest || {});
+    const toma = this.no(dps.toma || nfse.toma || {});
+    const serv = this.no(dps.serv || {});
+
+    const valores = this.no(nfse.valores || dps.valores || {});
+    const vServPrest = this.no(valores.vServPrest || serv.vServPrest || {});
+    const trib = this.no(valores.trib || dps.valores?.trib || {});
+    const tribMun = this.no(trib.tribMun || {});
+    const tribFed = this.no(trib.tribFed || {});
+
+    // Valor do serviço: é a base da nota inteira.
+    const total =
+      this.numero(vServPrest.vServ) ||
+      this.numero(valores.vServ) ||
+      this.numero(nfse.valores?.vLiq);
+
+    const baseCalculo = this.numero(tribMun.vBC) || total;
+    const aliquota = this.numero(tribMun.pAliq);
+    const iss = this.numero(tribMun.vISSQN) || this.numero(tribMun.vISS);
+
+    // Retenções federais feitas pelo tomador.
+    const pis = this.numero(tribFed.vRetPIS);
+    const cofins = this.numero(tribFed.vRetCOFINS) || this.numero(tribFed.vRetCofins);
+    const irrf = this.numero(tribFed.vRetIRRF);
+    const csll = this.numero(tribFed.vRetCSLL);
+    const inss = this.numero(tribFed.vRetCP) || this.numero(tribFed.vRetINSS);
+
+    const cnpjEmitente =
+      this.texto(prest.CNPJ) || this.texto(prest.CPF) || this.texto(nfse.emit?.CNPJ) || 'N/A';
+    const cnpjDestino = this.texto(toma.CNPJ) || this.texto(toma.CPF) || 'N/A';
+
+    const dataEmissao =
+      this.texto(nfse.dhProc) || this.texto(dps.dhEmi) || new Date().toISOString();
+
+    const regimeTributario = this.regimeDaNFSe(dps, prest);
+
+    const valoresDoc = {
+      baseCalculo,
+      icms: 0,
+      icmsST: 0,
+      ipi: 0,
+      iss,
+      pis,
+      cofins,
+      irrf,
+      aliquota,
+      cbs: 0,
+      ibs: 0,
+      total,
+    };
+
+    const validacoes = await this.validarConformeReforma(
+      valoresDoc,
+      regimeTributario,
+      new Date(dataEmissao).getFullYear()
+    );
+
+    // O ISS entra no motor de divergências como qualquer outro tributo; as
+    // retenções federais não, porque não são tributo do prestador e sim
+    // antecipação recolhida pelo tomador.
+    const divergencias = await this.calcularDivergencias(
+      { icms: 0, icmsST: 0, ipi: 0, iss, pis: 0, cofins: 0, irrf: 0 },
+      regimeTributario
+    );
+
+    if (csll > 0 || inss > 0) {
+      validacoes.push({
+        campo: 'Retenções',
+        situacao: 'informativo',
+        mensagem:
+          `Retenções de CSLL (${csll.toFixed(2)}) e INSS (${inss.toFixed(2)}) ` +
+          'identificadas na nota. Elas não entram no total de tributos, que ' +
+          'considera apenas ISS e as retenções de PIS, COFINS e IRRF.',
+      } as any);
+    }
+
+    return {
+      id: uuidv4(),
+      modelo: 'NFSE',
+      tipo,
+      chaveNFe: this.texto(nfse.chNFSe) || this.texto(nfse.nNFSe) || 'N/A',
+      dataEmissao,
+      cnpjEmitente,
+      nomeEmitente: this.texto(prest.xNome) || this.texto(prest.xFant) || 'N/A',
+      cnpjDestino,
+      nomeDestino: this.texto(toma.xNome) || 'Tomador não identificado',
+      regimeTributario,
+      values: valoresDoc,
+      validacoes,
+      divergencias,
+    };
+  }
+
+  /**
+   * Regime do prestador na NFS-e.
+   *
+   * O padrão nacional declara isso explicitamente em regTrib/opSimpNac, o que
+   * é mais confiável que inferir pelos tributos destacados como se faz na
+   * NF-e: 1 = não optante, 2 = MEI, 3 = ME/EPP do Simples.
+   */
+  private regimeDaNFSe(dps: any, prest: any): RegimeTributario {
+    const regTrib = this.no(dps.regTrib || prest.regTrib || {});
+    const opSimpNac = this.texto(regTrib.opSimpNac);
+
+    if (opSimpNac === '2' || opSimpNac === '3') return 'Simples-Nacional';
+    if (opSimpNac === '1') {
+      // Sem informação melhor, presumido é a hipótese mais provável para
+      // prestador de serviço fora do Simples.
+      const regEspTrib = this.texto(regTrib.regEspTrib);
+      return regEspTrib === '1' ? 'Lucro-Real' : 'Lucro-Presumido';
+    }
+
+    return 'Lucro-Presumido';
+  }
+
   private inferirRegimeTributario(
     icms: number,
     iss: number,

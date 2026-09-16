@@ -57,7 +57,10 @@ router.post('/nfe', authenticate, upload.single('file'), async (req: Request, re
 
     const tipoNormalizado = String(tipo).toLowerCase();
     const tipoDoc = (tipoNormalizado === 'entrada' ? 'Entrada' : 'Saída') as ImportacaoArquivo['tipo'];
-    const modeloDoc = parseInt(modelo, 10) as NFeModel;
+    // A NFS-e tem código textual; os demais modelos são numéricos.
+    const modeloDoc = (String(modelo).toUpperCase() === 'NFSE'
+      ? 'NFSE'
+      : parseInt(modelo, 10)) as NFeModel;
 
     // Validar tipo
     if (tipoNormalizado !== 'entrada' && tipoNormalizado !== 'saida') {
