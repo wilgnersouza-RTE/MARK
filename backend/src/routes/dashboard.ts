@@ -2,7 +2,6 @@
  * Router de Dashboard
  * GET /api/v1/dashboard              - Análise completa
  * GET /api/v1/dashboard/resumo       - Resumo geral
- * GET /api/v1/dashboard/divergencias - Divergências encontradas
  * GET /api/v1/dashboard/regimes      - Consolidado por regime tributário
  * GET /api/v1/dashboard/fornecedores - Top fornecedores
  * GET /api/v1/dashboard/transicao    - Transição 2024-2027
@@ -11,6 +10,7 @@
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../middleware/auth';
 import { sessionService } from '../services/session';
+import { resumoDoPreenchimento } from '../services/camposTributarios';
 import { dashboardService } from '../services/dashboard';
 import { DashboardData, NFeDocument } from '../types';
 
@@ -90,24 +90,6 @@ router.get('/resumo', authenticate, async (req: Request, res: Response) => {
     }
 
     responder(res, dashboard ? dashboard.resumoGeral : null);
-  } catch (error: any) {
-    erro(res, 500, error.message);
-  }
-});
-
-/**
- * GET /api/v1/dashboard/divergencias
- * Lista de divergências — `data` é o array
- */
-router.get('/divergencias', authenticate, async (req: Request, res: Response) => {
-  try {
-    const { dashboard, sessionId } = await carregarDashboard(req);
-
-    if (!sessionId) {
-      return erro(res, 400, 'Session ID não encontrado');
-    }
-
-    responder(res, dashboard ? dashboard.divergencias : []);
   } catch (error: any) {
     erro(res, 500, error.message);
   }
@@ -216,6 +198,54 @@ router.get('/documentos', authenticate, async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     erro(res, 500, error.message);
+  }
+});
+
+
+/**
+ * GET /api/v1/dashboard/campos
+ *
+ * Conferência de preenchimento dos campos tributários, nota a nota. Resposta
+ * enxuta de propósito: a tela lista as notas e só abre os campos da que o
+ * usuário expandir, mas paginar aqui exigiria manter estado no servidor para
+ * um volume que cabe folgado numa resposta só.
+ */
+router.get('/campos', authenticate, async (req: Request, res: Response) => {
+  try {
+    const sessionId = req.sessionId!;
+    const sessao = sessionService.obterSessao(sessionId);
+
+    if (!sessao) {
+      return responder(res, []);
+    }
+
+    const notas = sessao.documentos.map(doc => {
+      const campos = doc.camposTributarios ?? [];
+      const { preenchidos, total } = resumoDoPreenchimento(campos);
+
+      return {
+        id: doc.id,
+        numero: doc.chaveNFe,
+        modelo: doc.modelo,
+        emitente: doc.nomeEmitente,
+        cnpjEmitente: doc.cnpjEmitente,
+        valor: doc.values.total,
+        preenchidos,
+        totalCampos: total,
+        campos,
+      };
+    });
+
+    responder(res, {
+      notas,
+      resumo: {
+        total: notas.length,
+        completas: notas.filter(n => n.preenchidos === n.totalCampos).length,
+        incompletas: notas.filter(n => n.preenchidos < n.totalCampos).length,
+      },
+    });
+  } catch (erro: any) {
+    res.status(500).json({ success: false, error: erro.message });
   }
 });
 

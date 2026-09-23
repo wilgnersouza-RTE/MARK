@@ -55,7 +55,12 @@ export class SessionService {
   }
 
   /**
-   * Adiciona documentos à sessão e regenera dashboard
+   * Substitui os documentos da sessão e regenera o dashboard.
+   *
+   * Cada importação recomeça a análise: os documentos anteriores são
+   * descartados. Acumular era perigoso — um segundo ZIP somava entradas com
+   * saídas, ou março com abril, e todo indicador do painel passava a
+   * responder por um conjunto que ninguém tinha pedido, sem aviso na tela.
    */
   async adicionarDocumentos(
     sessionId: string,
@@ -68,11 +73,21 @@ export class SessionService {
       throw new Error('Sessão não encontrada');
     }
 
-    // Adicionar documentos
-    sessao.documentos.push(...documentos);
+    const anteriores = sessao.documentos.length;
 
-    // Registrar importação
-    sessao.importacoes.push(importacao);
+    // Troca, não soma.
+    sessao.documentos = [...documentos];
+
+    // O histórico guarda só a importação vigente, para o painel e a lista de
+    // importações contarem a mesma história.
+    sessao.importacoes = [importacao];
+
+    if (anteriores > 0) {
+      console.log(
+        `[sessao ${sessionId}] ${anteriores} documento(s) anterior(es) ` +
+          `descartados; ${documentos.length} importado(s).`
+      );
+    }
 
     // Regenerar dashboard
     sessao.dashboard = await dashboardService.generateDashboard(sessao.documentos);

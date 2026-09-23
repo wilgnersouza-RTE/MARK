@@ -12,8 +12,8 @@ import {
 
 import { MarcaRTE } from './components/Marca';
 import { Tooltip as DicaHover, AjudaIcone, MemoriaCalculo } from './components/Tooltip';
-import { AbaDivergencias } from './components/AbaDivergencias';
 import { AbaReforma } from './components/AbaReforma';
+import { CamposTributarios } from './components/CamposTributarios';
 import { AbaAdministracao } from './components/AbaAdministracao';
 import { TelaLogin } from './components/TelaLogin';
 import { PainelExecutivo } from './components/PainelExecutivo';
@@ -36,16 +36,6 @@ import {
 
 // ==================== TIPOS ====================
 
-interface Divergencia {
-  tributo: string;
-  ano: number;
-  valorAtual: number;
-  valorPrevisto: number;
-  diferenca: number;
-  percentual: number;
-  fornecedor: string;
-  cnpj: string;
-}
 
 interface ResumoGeral {
   totalDocumentos: number;
@@ -60,9 +50,6 @@ interface ResumoGeral {
   totalIRRF: number;
   totalRetidoTomador: number;
   totalDoPrestador: number;
-  documentosConformes: number;
-  documentosComDivergencias: number;
-  percentualConformidade: number;
 }
 
 interface RegimeDados {
@@ -200,7 +187,7 @@ const Header: React.FC<{
 
           {/*
             Todo o acesso a áreas fora do painel passa por aqui. Antes a
-            administração era uma aba ao lado de Painel e Divergências, o que
+            administração era uma aba ao lado das abas de análise, o que
             misturava análise com gestão de contas.
           */}
           <div className="relative">
@@ -362,6 +349,8 @@ const UploadSection: React.FC<{
   const [baixandoErros, setBaixandoErros] = useState(false);
   // Preenchido quando o lote não permitiu conferir entrada x saída.
   const [sentidoNaoVerificado, setSentidoNaoVerificado] = useState<string | null>(null);
+  // Quantos documentos da importação anterior foram descartados.
+  const [substituidos, setSubstituidos] = useState(0);
   const [mostrarConfig, setMostrarConfig] = useState(false);
 
   /**
@@ -405,6 +394,7 @@ const UploadSection: React.FC<{
     setUploadError(null);
     setRejeitados([]);
     setSentidoNaoVerificado(null);
+    setSubstituidos(0);
 
     try {
       const formData = new FormData();
@@ -429,6 +419,7 @@ const UploadSection: React.FC<{
         setSentidoNaoVerificado(
           response.data.data?.importacao?.sentidoNaoVerificado ?? null
         );
+        setSubstituidos(response.data.data?.importacao?.documentosSubstituidos ?? 0);
         await onUploadSuccess();
       } else {
         setUploadError(response.data.error);
@@ -510,6 +501,15 @@ const UploadSection: React.FC<{
 
         {uploadError && <p className="mt-4 text-sm text-red-600">{uploadError}</p>}
 
+        {substituidos > 0 && (
+          <p className="mt-4 rounded-lg border border-marca-azul/40 bg-marca-azul/5 px-3 py-2 text-left text-xs text-tinta-media">
+            A análise anterior foi substituída: {substituidos} documento
+            {substituidos > 1 ? 's' : ''} da importação anterior
+            {substituidos > 1 ? ' foram descartados' : ' foi descartado'}. Cada
+            importação recomeça a análise do zero.
+          </p>
+        )}
+
         {sentidoNaoVerificado && (
           <p className="mt-4 rounded-lg border border-fundo-borda bg-fundo-eleva px-3 py-2 text-left text-xs text-tinta-media">
             Entrada ou saída não pôde ser conferido neste lote. {sentidoNaoVerificado}
@@ -553,7 +553,9 @@ const UploadSection: React.FC<{
             )}
           </div>
         )}
-        <p className="text-tinta-suave text-sm mt-4">📦 Máximo 50MB • ZIP contendo XMLs de NF-e</p>
+        <p className="mt-4 text-sm text-tinta-suave">
+          Máximo 50MB • ZIP contendo XMLs • cada importação substitui a anterior
+        </p>
 
         {/* Configurações da Reforma Tributária do Consumo (IT 2025.002) */}
         <div className="mt-6 border-t border-fundo-borda border-marca-azul/30 pt-4">
@@ -583,7 +585,6 @@ const UploadSection: React.FC<{
 // Dashboard Content
 const DashboardContent: React.FC<{
   resumo: ResumoGeral | null;
-  divergencias: Divergencia[];
   regimes: RegimeDados[];
   fornecedores: FornecedorDados[];
   transicao: any;
@@ -595,7 +596,6 @@ const DashboardContent: React.FC<{
   onAssumirUsuario: (dados: any) => void;
 }> = ({
   resumo,
-  divergencias,
   regimes,
   fornecedores,
   transicao,
@@ -652,10 +652,7 @@ const DashboardContent: React.FC<{
             <MemoriaCalculo
               titulo="Total de Documentos"
               descricao="Contagem de XMLs de NF-e processados com sucesso nesta sessão."
-              linhas={[
-                { rotulo: 'Conformes', valor: formatarInteiro(resumo.documentosConformes) },
-                { rotulo: 'Com divergência', valor: formatarInteiro(resumo.documentosComDivergencias) },
-              ]}
+              linhas={[]}
               resultado={{ rotulo: 'Total', valor: formatarInteiro(resumo.totalDocumentos) }}
               origem="XMLs que falharam na leitura não entram nesta contagem — eles são listados no retorno da importação."
             />
@@ -724,83 +721,17 @@ const DashboardContent: React.FC<{
           }
         />
 
-        <StatCard
-          icon={<CheckCircle size={24} />}
-          label="Conformidade"
-          value={formatarPercentual(resumo.percentualConformidade, 1)}
-          color="border-purple-500"
-          complemento={
-            <div className="flex items-center gap-3 text-sm">
-              <DicaHover
-                largura={320}
-                conteudo={
-                  <MemoriaCalculo
-                    titulo="Documentos conformes"
-                    descricao="Notas em que todos os tributos destacados ficaram dentro da margem de 10% em relação à alíquota esperada para o regime e o ano de emissão."
-                    linhas={[]}
-                    resultado={{
-                      rotulo: 'Conformes',
-                      valor: formatarInteiro(resumo.documentosConformes),
-                    }}
-                  />
-                }
-              >
-                <span className="flex items-center gap-1 font-semibold text-emerald-700">
-                  <CheckCircle size={14} />
-                  {formatarInteiro(resumo.documentosConformes)}
-                </span>
-              </DicaHover>
-
-              <DicaHover
-                largura={320}
-                conteudo={
-                  <MemoriaCalculo
-                    titulo="Documentos com divergência"
-                    descricao="Notas em que ao menos um tributo destacado ficou fora da margem de 10% em relação à alíquota esperada. A divergência não indica erro automaticamente — pode haver benefício fiscal, regime especial ou substituição tributária."
-                    linhas={[]}
-                    resultado={{
-                      rotulo: 'Com divergência',
-                      valor: formatarInteiro(resumo.documentosComDivergencias),
-                    }}
-                  />
-                }
-              >
-                <span className="flex items-center gap-1 font-semibold text-red-600">
-                  <AlertTriangle size={14} />
-                  {formatarInteiro(resumo.documentosComDivergencias)}
-                </span>
-              </DicaHover>
-            </div>
-          }
-          memoria={
-            <MemoriaCalculo
-              titulo="Índice de Conformidade"
-              descricao="Percentual de notas sem nenhuma divergência tributária apontada."
-              linhas={[
-                { rotulo: 'Conformes', valor: formatarInteiro(resumo.documentosConformes) },
-                { rotulo: '÷ Total de documentos', valor: formatarInteiro(resumo.totalDocumentos) },
-                { rotulo: '× 100', valor: '' },
-              ]}
-              resultado={{
-                rotulo: 'Conformidade',
-                valor: formatarPercentual(resumo.percentualConformidade, 1),
-              }}
-              origem="Comparação feita contra as alíquotas de data/tax-rules.json, com tolerância de 10%."
-            />
-          }
-        />
       </div>
 
       {/* Tabs */}
       <div className="border-b border-fundo-borda">
         <div className="flex gap-4">
           {[
-            { id: 'painel', label: '📊 Painel' },
-            { id: 'resumo', label: '📋 Detalhado' },
-            { id: 'divergencias', label: '⚠️ Divergências' },
-            { id: 'regimes', label: '🏢 Regimes' },
-            { id: 'transicao', label: '📈 Transição' },
-            { id: 'reforma', label: '🏛️ Reforma 2027-2033' },
+            { id: 'painel', label: 'Painel' },
+            { id: 'resumo', label: 'Detalhado' },
+            { id: 'regimes', label: 'Regimes' },
+            { id: 'transicao', label: 'Transição' },
+            { id: 'reforma', label: 'Reforma 2027-2033' },
           ].map(tab => (
             <button
               key={tab.id}
@@ -820,7 +751,15 @@ const DashboardContent: React.FC<{
       {/* Tab Content */}
       <div>
         {activeTab === 'painel' && (
-          <PainelExecutivo sessionId={sessionId} token={token} />
+          <div className="space-y-6">
+            <PainelExecutivo sessionId={sessionId} token={token} />
+            {/*
+              A conferência de preenchimento fica no fim do painel: é leitura
+              de apoio, feita depois de olhar os números, e não o primeiro
+              dado que alguém procura ao abrir o sistema.
+            */}
+            <CamposTributarios sessionId={sessionId} token={token} />
+          </div>
         )}
 
         {activeTab === 'resumo' && (
@@ -946,119 +885,7 @@ const DashboardContent: React.FC<{
               })()}
             </Card>
 
-            {/* Conformidade */}
-            <Card>
-              <div className="mb-1 flex items-center gap-2">
-                <h3 className="font-semibold text-lg">Status de Conformidade</h3>
-                <AjudaIcone
-                  largura={340}
-                  conteudo={
-                    <MemoriaCalculo
-                      titulo="Como a conformidade é apurada"
-                      descricao="Cada nota tem os tributos destacados comparados com a alíquota esperada para o seu regime tributário e ano de emissão, conforme a tabela em data/tax-rules.json. Variação de até 10% é aceita."
-                      linhas={[
-                        { rotulo: 'Dentro da margem', valor: 'conforme' },
-                        { rotulo: 'Fora da margem', valor: 'divergência' },
-                      ]}
-                      origem="Divergência não significa erro: pode haver benefício fiscal, regime especial ou substituição tributária."
-                    />
-                  }
-                />
-              </div>
-              <p className="mb-4 text-sm text-tinta-suave">
-                {formatarInteiro(resumo.totalDocumentos)} documentos analisados
-              </p>
-
-              <div className="space-y-5">
-                <div>
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className="flex items-center gap-2 text-tinta-suave">
-                      <CheckCircle size={16} className="text-emerald-700" />
-                      Conformes
-                      <AjudaIcone
-                        tamanho={14}
-                        largura={330}
-                        conteudo={
-                          <MemoriaCalculo
-                            titulo="Documentos conformes"
-                            descricao="Notas em que todos os tributos destacados ficaram dentro da margem de 10% em relação à alíquota esperada para o regime e o ano de emissão."
-                            linhas={[
-                              { rotulo: 'Quantidade', valor: formatarInteiro(resumo.documentosConformes) },
-                              {
-                                rotulo: 'Participação',
-                                valor: formatarPercentual(resumo.percentualConformidade, 1),
-                              },
-                            ]}
-                            origem="Nenhum tributo da nota apresentou desvio relevante."
-                          />
-                        }
-                      />
-                    </span>
-                    <span className="font-semibold text-tinta-forte">
-                      {formatarInteiro(resumo.documentosConformes)}
-                      <span className="ml-2 text-sm font-normal text-tinta-suave">
-                        {formatarPercentual(resumo.percentualConformidade, 1)}
-                      </span>
-                    </span>
-                  </div>
-                  <div className="h-2 w-full rounded-full bg-fundo-borda">
-                    <div
-                      className="h-2 rounded-full bg-green-500 transition-all"
-                      style={{ width: `${Math.min(100, Math.max(0, resumo.percentualConformidade))}%` }}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className="flex items-center gap-2 text-tinta-suave">
-                      <AlertTriangle size={16} className="text-red-600" />
-                      Com divergências
-                      <AjudaIcone
-                        tamanho={14}
-                        largura={330}
-                        conteudo={
-                          <MemoriaCalculo
-                            titulo="Documentos com divergência"
-                            descricao="Notas em que ao menos um tributo destacado ficou fora da margem de 10% em relação à alíquota esperada. Cada ocorrência aparece detalhada na aba Divergências."
-                            linhas={[
-                              {
-                                rotulo: 'Quantidade',
-                                valor: formatarInteiro(resumo.documentosComDivergencias),
-                              },
-                              {
-                                rotulo: 'Participação',
-                                valor: formatarPercentual(100 - resumo.percentualConformidade, 1),
-                              },
-                            ]}
-                            origem="Revise antes de concluir: benefício fiscal, regime especial e ST produzem divergência legítima."
-                          />
-                        }
-                      />
-                    </span>
-                    <span className="font-semibold text-tinta-forte">
-                      {formatarInteiro(resumo.documentosComDivergencias)}
-                      <span className="ml-2 text-sm font-normal text-tinta-suave">
-                        {formatarPercentual(100 - resumo.percentualConformidade, 1)}
-                      </span>
-                    </span>
-                  </div>
-                  <div className="h-2 w-full rounded-full bg-fundo-borda">
-                    <div
-                      className="h-2 rounded-full bg-red-500 transition-all"
-                      style={{
-                        width: `${Math.min(100, Math.max(0, 100 - resumo.percentualConformidade))}%`,
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-            </Card>
           </div>
-        )}
-
-        {activeTab === 'divergencias' && (
-          <AbaDivergencias divergencias={divergencias} sessionId={sessionId} token={token} />
         )}
 
         {activeTab === 'regimes' && (
@@ -1212,7 +1039,7 @@ const DashboardContent: React.FC<{
           disabled={isLoading}
           className="flex-1 rounded-lg bg-gradient-to-r from-marca-azul to-marca-roxo px-4 py-3 font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
         >
-          🔄 Atualizar Dashboard
+          Atualizar dashboard
         </button>
         <button
           onClick={handleExportExcel}
@@ -1230,7 +1057,6 @@ const DashboardContent: React.FC<{
 const App: React.FC = () => {
   const { state, setToken, setSessionId, setUser, logout } = useAppStore();
   const [resumo, setResumo] = useState<ResumoGeral | null>(null);
-  const [divergencias, setDivergencias] = useState<Divergencia[]>([]);
   const [regimes, setRegimes] = useState<RegimeDados[]>([]);
   const [fornecedores, setFornecedores] = useState<FornecedorDados[]>([]);
   const [transicao, setTransicao] = useState<any>(null);
@@ -1294,14 +1120,8 @@ const App: React.FC = () => {
     setIsLoading(true);
 
     try {
-      const [resumoRes, divRes, regimeRes, transicaoRes, fornecedorRes] = await Promise.all([
+      const [resumoRes, regimeRes, transicaoRes, fornecedorRes] = await Promise.all([
         axios.get(`${API_URL}/api/v1/dashboard/resumo`, {
-          headers: {
-            'x-session-id': state.sessionId,
-            'Authorization': `Bearer ${state.token}`,
-          },
-        }),
-        axios.get(`${API_URL}/api/v1/dashboard/divergencias`, {
           headers: {
             'x-session-id': state.sessionId,
             'Authorization': `Bearer ${state.token}`,
@@ -1328,7 +1148,6 @@ const App: React.FC = () => {
       ]);
 
       setResumo(resumoRes.data.data);
-      setDivergencias(divRes.data.data || []);
       setRegimes(regimeRes.data.data || []);
       setTransicao(transicaoRes.data.data);
       setFornecedores(fornecedorRes.data.data || []);
@@ -1428,7 +1247,6 @@ const App: React.FC = () => {
         <div className="mt-8">
           <DashboardContent
             resumo={resumo}
-            divergencias={divergencias}
             regimes={regimes}
             fornecedores={fornecedores}
             transicao={transicao}

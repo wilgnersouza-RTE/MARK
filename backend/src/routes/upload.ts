@@ -198,7 +198,11 @@ router.post('/nfe', authenticate, upload.single('file'), async (req: Request, re
       timestamp: new Date().toISOString(),
     };
 
-    // Adicionar à sessão
+    // Quantos documentos existiam antes, para a tela poder avisar que a
+    // análise anterior foi substituída.
+    const documentosAnteriores = sessao.documentos.length;
+
+    // Substitui os documentos da sessão: cada importação recomeça a análise.
     await sessionService.adicionarDocumentos(sessionId, documentos, importacao);
 
     res.json({
@@ -216,7 +220,9 @@ router.post('/nfe', authenticate, upload.single('file'), async (req: Request, re
           // conferido. A tela avisa em vez de dar a validação por feita.
           sentidoNaoVerificado: sentido.sentido ? null : sentido.justificativa,
           documentosImportados: documentos.length,
-          totalDocumentosSessao: sessao.documentos.length,
+          totalDocumentosSessao: documentos.length,
+          /** Quantidade descartada da importação anterior, se houver */
+          documentosSubstituidos: documentosAnteriores,
         },
         erros: erros.length > 0 ? erros : undefined,
       },

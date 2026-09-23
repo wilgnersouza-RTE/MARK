@@ -15,7 +15,6 @@ export class ExcelExportService {
     // Adicionar abas
     this.addResumoAba(workbook, dashboard);
     this.addDocumentosAba(workbook, documentos);
-    this.addDivergenciasAba(workbook, dashboard.divergencias);
     this.addPorRegimeAba(workbook, dashboard.porRegime);
     this.addPorFornecedorAba(workbook, dashboard.porFornecedor);
     this.addTransicaoAba(workbook, dashboard.transicaoAnual);
@@ -47,9 +46,6 @@ export class ExcelExportService {
       ['IRRF', `R$ ${resumoGeral.totalIRRF.toFixed(2)}`],
       [],
       ['CONFORMIDADE'],
-      ['Documentos Conformes', resumoGeral.documentosConformes],
-      ['Documentos com Divergências', resumoGeral.documentosComDivergencias],
-      ['Percentual de Conformidade', `${resumoGeral.percentualConformidade.toFixed(2)}%`],
     ];
 
     const worksheet = XLSX.utils.aoa_to_sheet(data);
@@ -77,12 +73,10 @@ export class ExcelExportService {
         'COFINS',
         'IRRF',
         'Valor Total',
-        'Conforme?',
       ],
     ];
 
     for (const doc of documentos) {
-      const conforme = doc.divergencias.length === 0 ? 'Sim' : 'Não';
       data.push([
         doc.id.substring(0, 8),
         String(doc.modelo),
@@ -98,7 +92,6 @@ export class ExcelExportService {
         doc.values.cofins.toFixed(2),
         doc.values.irrf.toFixed(2),
         doc.values.total.toFixed(2),
-        conforme,
       ]);
     }
 
@@ -109,43 +102,6 @@ export class ExcelExportService {
 
   /**
    * Adiciona aba de divergências
-   */
-  private addDivergenciasAba(workbook: XLSX.WorkBook, divergencias: any[]): void {
-    const data = [
-      ['DIVERGÊNCIAS ENCONTRADAS'],
-      [],
-      ['Tributo', 'Ano', 'Valor Atual', 'Valor Previsto', 'Diferença', 'Percentual', 'Fornecedor', 'CNPJ'],
-    ];
-
-    for (const div of divergencias) {
-      data.push([
-        div.tributo,
-        div.ano,
-        `R$ ${div.valorAtual.toFixed(2)}`,
-        `R$ ${div.valorPrevisto.toFixed(2)}`,
-        `R$ ${div.diferenca.toFixed(2)}`,
-        `${div.percentual.toFixed(2)}%`,
-        div.fornecedor,
-        div.cnpj,
-      ]);
-    }
-
-    const worksheet = XLSX.utils.aoa_to_sheet(data);
-    worksheet['!cols'] = [
-      { wch: 12 },
-      { wch: 8 },
-      { wch: 15 },
-      { wch: 15 },
-      { wch: 15 },
-      { wch: 12 },
-      { wch: 25 },
-      { wch: 15 },
-    ];
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Divergências');
-  }
-
-  /**
-   * Adiciona aba de análise por regime
    */
   private addPorRegimeAba(workbook: XLSX.WorkBook, porRegime: any[]): void {
     const data = [
@@ -190,9 +146,9 @@ export class ExcelExportService {
    */
   private addPorFornecedorAba(workbook: XLSX.WorkBook, porFornecedor: any[]): void {
     const data = [
-      ['TOP FORNECEDORES - ANÁLISE DE CONFORMIDADE'],
+      ['TOP FORNECEDORES'],
       [],
-      ['Fornecedor', 'CNPJ', 'Regime', 'Quantidade', 'Valor Total', 'Tributos', 'Conformidade'],
+      ['Fornecedor', 'CNPJ', 'Regime', 'Quantidade', 'Valor Total', 'Tributos'],
     ];
 
     for (const forn of porFornecedor) {
@@ -203,12 +159,11 @@ export class ExcelExportService {
         forn.quantidade,
         `R$ ${forn.valor.toFixed(2)}`,
         `R$ ${forn.tributos.toFixed(2)}`,
-        `${forn.conformidade.toFixed(2)}%`,
       ]);
     }
 
     const worksheet = XLSX.utils.aoa_to_sheet(data);
-    worksheet['!cols'] = [{ wch: 25 }, { wch: 18 }, { wch: 15 }, { wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 15 }];
+    worksheet['!cols'] = [{ wch: 25 }, { wch: 18 }, { wch: 15 }, { wch: 12 }, { wch: 15 }, { wch: 15 }];
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Fornecedores');
   }
 

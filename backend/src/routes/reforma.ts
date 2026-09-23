@@ -3,7 +3,6 @@
  * GET /api/v1/reforma/metadados          - anos, regimes e avisos da tabela
  * GET /api/v1/reforma/simulacao?ano=2033 - simulação de um ano
  * GET /api/v1/reforma/serie              - série completa para gráficos
- * GET /api/v1/reforma/divergencias?ano=  - divergências recalculadas por ano
  */
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../middleware/auth';
@@ -74,18 +73,6 @@ router.get('/serie', authenticate, (req: Request, res: Response) => {
     if (documentos === null) return erro(res, 400, 'Session ID não encontrado');
 
     responder(res, reformaService.simularSerie(documentos, lerParametros(req)));
-  } catch (e: any) {
-    erro(res, 400, e.message);
-  }
-});
-
-router.get('/divergencias', authenticate, (req: Request, res: Response) => {
-  try {
-    const documentos = documentosDaSessao(req);
-    if (documentos === null) return erro(res, 400, 'Session ID não encontrado');
-
-    const ano = parseInt(String(req.query.ano || '2027'), 10);
-    responder(res, reformaService.divergenciasPorAno(documentos, ano, lerParametros(req)));
   } catch (e: any) {
     erro(res, 400, e.message);
   }

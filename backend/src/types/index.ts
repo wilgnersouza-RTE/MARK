@@ -109,6 +109,25 @@ export interface NFeDocument {
   values: NFeValues;
   validacoes: Validacao[];
   divergencias: Divergencia[];
+  /** Conferência de preenchimento dos campos tributários da nota */
+  camposTributarios?: CampoTributario[];
+}
+
+/**
+ * Situação de um campo tributário na nota.
+ *
+ * 'parcial' existe porque em NF-e os campos vivem no item, não na nota: uma
+ * nota com cinco produtos pode trazer o grupo de IBS/CBS em três deles.
+ * Reportar isso como preenchido ou ausente esconderia o problema.
+ */
+export interface CampoTributario {
+  grupo: 'atual' | 'reforma';
+  campo: string;
+  situacao: 'preenchido' | 'parcial' | 'ausente';
+  /** Valor lido, quando houver */
+  valor?: string;
+  /** Em documentos com itens, em quantos deles o campo aparece */
+  itens?: { com: number; total: number };
 }
 
 // ==================== Validação e Tributos ====================

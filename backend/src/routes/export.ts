@@ -105,61 +105,6 @@ router.get('/json', authenticate, async (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/v1/export/csv-divergencias
- * Exportar apenas as divergências em CSV
- */
-router.get('/csv-divergencias', authenticate, async (req: Request, res: Response) => {
-  try {
-    const sessionId = req.sessionId || (req.headers['x-session-id'] as string | undefined);
-
-    if (!sessionId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Session ID não encontrado',
-        timestamp: new Date().toISOString(),
-      });
-    }
-
-    const documentos = sessionService.obterDocumentos(sessionId);
-
-    if (!documentos || documentos.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Nenhum documento para exportar',
-        timestamp: new Date().toISOString(),
-      });
-    }
-
-    const dashboard = await dashboardService.generateDashboard(documentos);
-
-    // Ponto e vírgula como separador: é o que o Excel em pt-BR espera
-    const escapar = (valor: unknown) => `"${String(valor ?? '').replace(/"/g, '""')}"`;
-    const cabecalho = ['tributo', 'ano', 'valorAtual', 'valorPrevisto', 'diferenca', 'percentual'];
-
-    const linhas = dashboard.divergencias.map((d: any) =>
-      cabecalho.map(coluna => escapar(d[coluna])).join(';')
-    );
-
-    // BOM para o Excel reconhecer o UTF-8 e não quebrar os acentos
-    const csv = '\uFEFF' + [cabecalho.join(';'), ...linhas].join('\r\n');
-
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="divergencias-${new Date().getTime()}.csv"`
-    );
-    res.send(csv);
-  } catch (error: any) {
-    console.error('Erro ao exportar CSV:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Erro ao exportar dados',
-      timestamp: new Date().toISOString(),
-    });
-  }
-});
-
-/**
  * Planilha dos arquivos recusados na importação.
  *
  * Recebe a lista por POST em vez de ler da sessão porque, quando a

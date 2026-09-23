@@ -1,6 +1,11 @@
 import { parseStringPromise } from 'xml2js';
 import { NFeDocument, NFeModel, DocumentType, RegimeTributario, Validacao, Divergencia } from '../types';
 import { rotuloModelo } from '../utils/modelos';
+import {
+  conferirCamposNFe,
+  conferirCamposNFSe,
+  type ItemConferido,
+} from './camposTributarios';
 import { v4 as uuidv4 } from 'uuid';
 import { taxRulesService } from './taxRules';
 import { reformaService } from './reforma';
@@ -158,19 +163,14 @@ export class NFEParserService {
       );
 
       // Calcular divergências
-      const divergencias = await this.calcularDivergencias(
-        {
-          icms,
-          icmsST,
-          ipi,
-          iss,
-          pis,
-          cofins,
-          irrf,
-        },
-        regimeTributario,
-        baseCalculo
-      );
+      // A análise de divergências foi retirada do produto. O campo
+      // permanece na estrutura, sempre vazio, para não quebrar quem a
+      // consome.
+      const divergencias: Divergencia[] = [];
+
+      // Conferência de preenchimento: percorre os itens, onde vivem o CST e
+      // o grupo de IBS/CBS.
+      const camposTributarios = conferirCamposNFe(this.lerItens(nfe));
 
       const documento: NFeDocument = {
         id: uuidv4(),
@@ -208,6 +208,7 @@ export class NFEParserService {
         },
         validacoes,
         divergencias,
+        camposTributarios,
       };
 
       return documento;
@@ -403,13 +404,7 @@ export class NFEParserService {
       new Date(dataEmissao).getFullYear()
     );
 
-    // Só o ISS entra no confronto de divergências: as retenções federais não
-    // são tributo do prestador, e sim antecipação recolhida pelo tomador.
-    const divergencias = await this.calcularDivergencias(
-      { icms: 0, icmsST: 0, ipi: 0, iss, pis: 0, cofins: 0, irrf: 0 },
-      regimeTributario,
-      baseCalculo
-    );
+    const divergencias: Divergencia[] = [];
 
     if (issEhRetido) {
       validacoes.push({
@@ -431,6 +426,35 @@ export class NFEParserService {
       } as any);
     }
 
+    const camposTributarios = conferirCamposNFSe({
+      baseCalculo,
+      aliquota,
+      iss,
+      issRetido: issEhRetido,
+      pis,
+      cofins,
+      irrf,
+      csll,
+      inss,
+      cst: this.textoDe(raiz, ['CST']) || undefined,
+      cClassTrib: this.textoDe(raiz, ['cClassTrib', 'ClassificacaoTributaria']) || undefined,
+      baseIBSCBS: this.buscar(raiz, ['BaseCalculoIBSCBS']) !== undefined
+        ? this.numeroDe(raiz, ['BaseCalculoIBSCBS'])
+        : undefined,
+      ibsEstadual: this.buscar(raiz, ['IBS']) !== undefined
+        ? this.numeroDe(this.buscar(raiz, ['IBS']) ?? {}, ['Vlr'])
+        : undefined,
+      ibsMunicipal: this.buscar(raiz, ['IBSMunicipal']) !== undefined
+        ? this.numeroDe(this.buscar(raiz, ['IBSMunicipal']) ?? {}, ['Vlr'])
+        : undefined,
+      cbs: this.buscar(raiz, ['CBS']) !== undefined
+        ? this.numeroDe(this.buscar(raiz, ['CBS']) ?? {}, ['Vlr'])
+        : undefined,
+      impostoSeletivo: this.buscar(raiz, ['IS']) !== undefined
+        ? this.numeroDe(this.buscar(raiz, ['IS']) ?? {}, ['Vlr'])
+        : undefined,
+    });
+
     return {
       id: uuidv4(),
       modelo: 'NFSE',
@@ -449,6 +473,7 @@ export class NFEParserService {
       values: valoresDoc,
       validacoes,
       divergencias,
+      camposTributarios,
     };
   }
 
@@ -468,6 +493,68 @@ export class NFEParserService {
     if (opcaoSimples === '1') return 'Simples-Nacional';
 
     return 'Lucro-Presumido';
+  }
+
+
+  /**
+   * Percorre os itens da nota para conferir os campos tributários.
+   *
+   * O restante do parser trabalha com os totais em <ICMSTot>, que bastam para
+   * apurar valores. Os campos da reforma, porém, são declarados por produto:
+   * o grupo <IBSCBS> vive dentro de <imposto> de cada <det>, com o CST, o
+   * cClassTrib e os subgrupos de IBS estadual, IBS municipal e CBS.
+   *
+   * Os nomes das tags são buscados em variações porque o leiaute evoluiu
+   * entre as notas técnicas, e há emissores gravando <gIBSCBS> e outros
+   * <IBSCBS>.
+   */
+  private lerItens(nfe: any): ItemConferido[] {
+    const brutos = nfe.det;
+    if (!brutos) return [];
+
+    const lista = Array.isArray(brutos) ? brutos : [brutos];
+
+    return lista.map((det: any) => {
+      const imposto = this.no(det?.imposto) || {};
+
+      // O CST do ICMS fica dentro de um filho cujo nome varia com a
+      // tributação (ICMS00, ICMS20, ICMSSN101...). Pega-se o primeiro.
+      const icmsPai = this.no(imposto.ICMS) || {};
+      const icms = this.no(Object.values(icmsPai)[0]) || {};
+
+      const ipi = this.no(this.no(imposto.IPI)?.IPITrib) || {};
+      const pisPai = this.no(imposto.PIS) || {};
+      const pis = this.no(Object.values(pisPai)[0]) || {};
+      const cofinsPai = this.no(imposto.COFINS) || {};
+      const cofins = this.no(Object.values(cofinsPai)[0]) || {};
+
+      // Grupo da reforma
+      const reforma = this.no(imposto.IBSCBS || imposto.gIBSCBS) || {};
+      const ibsUF = this.no(reforma.gIBSUF || reforma.IBSUF) || {};
+      const ibsMun = this.no(reforma.gIBSMun || reforma.IBSMun) || {};
+      const cbsGrupo = this.no(reforma.gCBS || reforma.CBS) || {};
+      const seletivo = this.no(imposto.IS || imposto.gIS) || {};
+
+      return {
+        cstICMS: this.texto(icms.CST) || this.texto(icms.CSOSN) || undefined,
+        baseICMS: this.texto(icms.vBC) || undefined,
+        aliquotaICMS: this.texto(icms.pICMS) || undefined,
+        valorICMS: this.texto(icms.vICMS) || undefined,
+        valorIPI: this.texto(ipi.vIPI) || undefined,
+        cstPIS: this.texto(pis.CST) || undefined,
+        valorPIS: this.texto(pis.vPIS) || undefined,
+        cstCOFINS: this.texto(cofins.CST) || undefined,
+        valorCOFINS: this.texto(cofins.vCOFINS) || undefined,
+
+        cstReforma: this.texto(reforma.CST) || undefined,
+        cClassTrib: this.texto(reforma.cClassTrib) || undefined,
+        baseIBSCBS: this.texto(reforma.vBC) || undefined,
+        ibsEstadual: this.texto(ibsUF.vIBSUF) || this.texto(ibsUF.pIBSUF) || undefined,
+        ibsMunicipal: this.texto(ibsMun.vIBSMun) || this.texto(ibsMun.pIBSMun) || undefined,
+        cbs: this.texto(cbsGrupo.vCBS) || this.texto(cbsGrupo.pCBS) || undefined,
+        impostoSeletivo: this.texto(seletivo.vIS) || this.texto(seletivo.pIS) || undefined,
+      };
+    });
   }
 
   private inferirRegimeTributario(
@@ -558,123 +645,6 @@ export class NFEParserService {
     return validacoes;
   }
 
-  /**
-   * Calcular divergências entre valores atuais e previstos na reforma.
-   *
-   * A lista abaixo define quais tributos são confrontados. O IPI e o ICMS-ST
-   * já estão contemplados pelo motor, mas só entram no resultado quando a
-   * alíquota esperada existir em data/tax-rules.json — sem regra cadastrada
-   * não há com o que comparar, e inventar um número aqui produziria
-   * divergência falsa na tela.
-   */
-  private async calcularDivergencias(
-    tributos: {
-      icms: number;
-      icmsST: number;
-      ipi: number;
-      iss: number;
-      pis: number;
-      cofins: number;
-      irrf: number;
-    },
-    regime: RegimeTributario,
-    /** Base sobre a qual a alíquota esperada é aplicada. */
-    baseCalculo: number
-  ): Promise<Divergencia[]> {
-    const divergencias: Divergencia[] = [];
-    const anos = [2024, 2025, 2026, 2027];
-
-    /** rotulo exibido, chave no arquivo de regras, valor da nota, tolerância */
-    const confrontos: Array<{
-      rotulo: string;
-      chave: string;
-      atual: number;
-    }> = [
-      { rotulo: 'ICMS', chave: 'icms', atual: tributos.icms },
-      { rotulo: 'ICMS-ST', chave: 'icmsST', atual: tributos.icmsST },
-      { rotulo: 'IPI', chave: 'ipi', atual: tributos.ipi },
-      { rotulo: 'ISS', chave: 'iss', atual: tributos.iss },
-      { rotulo: 'PIS', chave: 'pis', atual: tributos.pis },
-      { rotulo: 'COFINS', chave: 'cofins', atual: tributos.cofins },
-    ];
-
-    // Diferença abaixo de um real é arredondamento, não divergência.
-    const TOLERANCIA_EM_REAIS = 1;
-
-    for (const ano of anos) {
-      const regras = await taxRulesService.getRegrasPorAno(ano);
-      if (!regras) continue;
-
-      for (const c of confrontos) {
-        if (c.atual <= 0) continue;
-
-        const regra = (regras as unknown as Record<string, unknown>)[c.chave];
-        if (!regra || typeof regra !== 'object') continue;
-
-        // Todas as alíquotas de tax-rules.json estão em percentual
-        // (ICMS 18.0, PIS 1.65). Um comentário antigo no código dizia que o
-        // ICMS vinha em fração e o multiplicava por cem, o que gerava
-        // alíquota de 1800% — o previsto saía cem vezes maior que o devido.
-        const aliquota = this.getAliquotaPorRegime(
-          regra as Record<string, number | string | undefined>,
-          regime
-        );
-
-        // O previsto é um VALOR, não uma alíquota. Comparar o imposto
-        // destacado contra o percentual esperado produzia diferenças
-        // absurdas — R$ 8.600 contra 3,75, com percentual na casa das
-        // centenas de milhares.
-        const previsto = (baseCalculo * aliquota) / 100;
-        const diferenca = previsto - c.atual;
-
-        if (previsto > 0 && Math.abs(diferenca) > TOLERANCIA_EM_REAIS) {
-          divergencias.push({
-            tributo: c.rotulo,
-            ano,
-            valorAtual: c.atual,
-            valorPrevisto: previsto,
-            diferenca,
-            percentual: (diferenca / previsto) * 100,
-          });
-        }
-      }
-    }
-
-    // ---------- IPI e ICMS-ST ----------
-    // Estes dois não têm alíquota esperada em tax-rules.json, mas a tabela
-    // de transição da reforma (data/reforma-transicao.json, com base legal
-    // declarada no próprio arquivo) traz o fator de cada ano: o IPI vai a
-    // zero em 2027, com exceção da Zona Franca, e o ICMS-ST acompanha o
-    // fator do ICMS. O previsto sai daí, sem número arbitrado.
-    for (const ano of [2027, 2028, 2029, 2030, 2031, 2032, 2033]) {
-      const regraAno = reformaService.obterRegra(ano);
-      if (!regraAno) continue;
-
-      const porFator: Array<{ rotulo: string; atual: number; fator: number }> = [
-        { rotulo: 'IPI', atual: tributos.ipi, fator: regraAno.ipi?.fator ?? 1 },
-        { rotulo: 'ICMS-ST', atual: tributos.icmsST, fator: regraAno.icms?.fator ?? 1 },
-      ];
-
-      for (const t of porFator) {
-        if (t.atual <= 0) continue;
-
-        const previsto = t.atual * t.fator;
-        const diferenca = previsto - t.atual;
-        if (Math.abs(diferenca) < 0.01) continue;
-
-        divergencias.push({
-          tributo: t.rotulo,
-          ano,
-          valorAtual: t.atual,
-          valorPrevisto: previsto,
-          diferenca,
-          percentual: t.atual === 0 ? 0 : (diferenca / t.atual) * 100,
-        });
-      }
-    }
-
-    return divergencias;
-  }
 }
 
 export const nfeParserService = new NFEParserService();

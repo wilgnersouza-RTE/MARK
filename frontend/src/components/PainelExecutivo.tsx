@@ -40,7 +40,6 @@ interface Documento {
       irrf: number;
     };
   };
-  divergencias: any[];
 }
 
 const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
@@ -364,7 +363,10 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
     };
 
     // Fornecedores
-    const porFornecedor = new Map<string, { nome: string; cnpj: string; valor: number; tributos: number; qtd: number; divergencias: number }>();
+    const porFornecedor = new Map<
+      string,
+      { nome: string; cnpj: string; valor: number; tributos: number; qtd: number }
+    >();
     for (const d of filtrados) {
       const atual = porFornecedor.get(d.cnpjEmitente) || {
         nome: d.nomeEmitente,
@@ -372,13 +374,11 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
         valor: 0,
         tributos: 0,
         qtd: 0,
-        divergencias: 0,
       };
       atual.valor += d.values.total;
       atual.tributos +=
         d.values.icms + d.values.icmsST + d.values.ipi + d.values.iss + d.values.pis + d.values.cofins;
       atual.qtd += 1;
-      atual.divergencias += d.divergencias?.length || 0;
       porFornecedor.set(d.cnpjEmitente, atual);
     }
 
@@ -429,7 +429,6 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
       porRegime.set(d.regimeTributario, atual);
     }
 
-    const comDivergencia = filtrados.filter(d => (d.divergencias?.length || 0) > 0).length;
 
     return {
       valor,
@@ -451,9 +450,6 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
         qtd: v.qtd,
         fornecedores: v.cnpjs.size,
       })),
-      comDivergencia,
-      conformidade:
-        filtrados.length > 0 ? ((filtrados.length - comDivergencia) / filtrados.length) * 100 : 0,
       periodo:
         serieMensal.length > 0
           ? `${serieMensal[0].mes} a ${serieMensal[serieMensal.length - 1].mes}`
@@ -464,14 +460,6 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
   // ==================== ALERTAS AUTOMÁTICOS ====================
   const alertas = useMemo(() => {
     const lista: Array<{ titulo: string; detalhe: string; cor: 'vermelho' | 'ambar' }> = [];
-
-    if (dados.comDivergencia > 0) {
-      lista.push({
-        titulo: `${formatarInteiro(dados.comDivergencia)} notas com divergência tributária`,
-        detalhe: `${formatarPercentual(100 - dados.conformidade, 1)} do total analisado. Revise antes de concluir: benefício fiscal e ST geram divergência legítima.`,
-        cor: 'vermelho',
-      });
-    }
 
     const simples = dados.regimes.find(r => r.regime.toLowerCase().includes('simples'));
     if (simples && dados.valor > 0) {
@@ -672,23 +660,6 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
           serie={dados.serieMensal.map(m => ({ v: m.tributos }))}
         />
         <CartaoKPI rotulo="Carga tributária" valor={formatarPercentual(dados.carga, 1)} />
-        <CartaoKPI
-          rotulo="Conformidade"
-          valor={formatarPercentual(dados.conformidade, 1)}
-          memoria={
-            <MemoriaCalculo
-              titulo="Conformidade"
-              descricao="Notas sem nenhuma divergência apontada, sobre o total filtrado."
-              linhas={[
-                {
-                  rotulo: 'Conformes',
-                  valor: formatarInteiro(filtrados.length - dados.comDivergencia),
-                },
-                { rotulo: 'Com divergência', valor: formatarInteiro(dados.comDivergencia) },
-              ]}
-            />
-          }
-        />
       </div>
 
       {/* ==================== EVOLUÇÃO MENSAL ==================== */}
@@ -864,64 +835,6 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
 
       {/* ==================== TABELAS ==================== */}
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <Painel
-          titulo="Fornecedores com divergência"
-          subtitulo="ordenados por ocorrências"
-          memoria={
-            <MemoriaCalculo
-              titulo="Fornecedores com divergência"
-              descricao="Contagem de divergências apuradas nas notas de cada fornecedor."
-              linhas={[
-                { rotulo: 'Ocorrência', valor: 'uma por tributo e ano' },
-                { rotulo: 'Ordenação', valor: 'mais ocorrências primeiro' },
-              ]}
-              origem="A mesma nota pode gerar mais de uma ocorrência."
-            />
-          }
-        >
-          <div className="overflow-x-auto">
-            <table className="w-full text-[11px]">
-              <thead>
-                <tr className="text-left text-tinta-forte">
-                  <th className="pb-2 font-medium">FORNECEDOR</th>
-                  <th className="pb-2 font-medium">CNPJ</th>
-                  <th className="pb-2 text-right font-medium">NOTAS</th>
-                  <th className="pb-2 text-right font-medium">OCORRÊNCIAS</th>
-                  <th className="pb-2 text-right font-medium">VALOR</th>
-                </tr>
-              </thead>
-              <tbody>
-                {dados.fornecedores
-                  .filter(f => f.divergencias > 0)
-                  .sort((a, b) => b.divergencias - a.divergencias)
-                  .slice(0, 6)
-                  .map(f => (
-                    <tr key={f.cnpj} className="border-t border-fundo-borda">
-                      <td className="max-w-[150px] truncate py-2 font-medium text-rotulo">{f.nome}</td>
-                      <td className="py-2 font-mono text-tinta-suave">{formatarCNPJ(f.cnpj)}</td>
-                      <td className="py-2 text-right text-tinta-fraca">{formatarInteiro(f.qtd)}</td>
-                      <td className="py-2 text-right">
-                        <span className="rounded bg-red-500/15 px-1.5 py-0.5 font-semibold text-red-700">
-                          {formatarInteiro(f.divergencias)}
-                        </span>
-                      </td>
-                      <td className="py-2 text-right font-mono text-tinta-media">
-                        {formatarMoedaCompacta(f.valor)}
-                      </td>
-                    </tr>
-                  ))}
-                {dados.fornecedores.filter(f => f.divergencias > 0).length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="py-6 text-center text-tinta-suave">
-                      Nenhuma divergência nos filtros atuais.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </Painel>
-
         <Painel
           titulo="Composição por regime"
           subtitulo="fornecedores, notas e valor"
