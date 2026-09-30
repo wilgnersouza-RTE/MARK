@@ -5,7 +5,7 @@ import { authenticate } from '../middleware/auth';
 import { nfeParserService } from '../services/nfeParser';
 import { sessionService } from '../services/session';
 import { ImportacaoArquivo, ErroProcessamento, NFeModel } from '../types';
-import { CODIGOS_MODELO, rotuloModelo } from '../utils/modelos';
+import { CODIGOS_MODELO, MODELOS_DOCUMENTO, rotuloModelo } from '../utils/modelos';
 import { inferirSentido } from '../utils/sentidoImportacao';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -75,7 +75,9 @@ router.post('/nfe', authenticate, upload.single('file'), async (req: Request, re
     if (!CODIGOS_MODELO.includes(modeloDoc as (typeof CODIGOS_MODELO)[number])) {
       return res.status(400).json({
         success: false,
-        error: 'Modelo deve ser NF-e (55), NFC-e (65) ou CT-e (57)',
+        error:
+          'Modelo inválido. Aceitos: ' +
+          MODELOS_DOCUMENTO.map(m => rotuloModelo(m.codigo)).join(', ') + '.',
         timestamp: new Date().toISOString(),
       });
     }

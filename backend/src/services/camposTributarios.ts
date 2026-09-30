@@ -205,6 +205,8 @@ export function conferirCamposCTe(dados: {
   valorTotalServico?: unknown;
   valorAReceber?: unknown;
   totalTributos?: unknown;
+  /** Só existe no CT-e OS, no bloco infTribFed */
+  inss?: unknown;
   cstReforma?: string;
   cClassTrib?: string;
   baseIBSCBS?: unknown;
@@ -221,6 +223,7 @@ export function conferirCamposCTe(dados: {
     campoDaNota('atual', 'Valor total do serviço', dados.valorTotalServico, numeroExibido(dados.valorTotalServico)),
     campoDaNota('atual', 'Valor a receber', dados.valorAReceber, numeroExibido(dados.valorAReceber)),
     campoDaNota('atual', 'Total de tributos', dados.totalTributos, numeroExibido(dados.totalTributos)),
+    campoDaNota('atual', 'INSS', dados.inss, numeroExibido(dados.inss)),
 
     campoDaNota('reforma', 'CST', dados.cstReforma),
     campoDaNota('reforma', 'cClassTrib', dados.cClassTrib),

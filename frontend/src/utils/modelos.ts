@@ -8,7 +8,8 @@
 export const MODELOS_DOCUMENTO = [
   { codigo: '55', nome: 'NF-e', descricao: 'Nota Fiscal Eletrônica' },
   { codigo: '65', nome: 'NFC-e', descricao: 'Nota Fiscal de Consumidor Eletrônica' },
-  { codigo: '57', nome: 'CT-e', descricao: 'Conhecimento de Transporte Eletrônico' },
+  { codigo: '57', nome: 'CT-e', descricao: 'Conhecimento de Transporte Eletrônico — carga' },
+  { codigo: '67', nome: 'CT-e OS', descricao: 'CT-e Outros Serviços — passageiros, valores e excesso de bagagem' },
   // Sem número entre parênteses: a NFS-e do padrão nacional não usa a
   // numeração de modelo da SEFAZ.
   { codigo: 'NFSE', nome: 'NFS-e', descricao: 'Nota Fiscal de Serviço Eletrônica — padrão nacional' },

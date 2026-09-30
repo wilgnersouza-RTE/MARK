@@ -68,7 +68,10 @@ export class NFEParserService {
 
       // A nota autorizada pela SEFAZ vem embrulhada em <nfeProc>; a nota apenas
       // assinada vem direto em <NFe>. Aceitamos as duas formas.
-      const raiz = result.nfeProc || result.cteProc || result;
+      // Cada documento vem embrulhado no seu próprio envelope de
+      // processamento: nfeProc para NF-e, cteProc para CT-e de carga e
+      // cteOSProc para CT-e OS.
+      const raiz = result.nfeProc || result.cteProc || result.cteOSProc || result;
 
       // NFS-e de qualquer município: estrutura própria, parser próprio.
       const ehNFSe = this.ehNotaDeServico(raiz);
@@ -94,19 +97,28 @@ export class NFEParserService {
       // devolver "estrutura de XML inválida" para um arquivo perfeitamente
       // válido que só não é uma NF-e.
       if (!nfe) {
-        const ehCTe = Boolean(raiz.CTe?.infCte || raiz.infCte);
-        if (ehCTe) {
-          if (modelo !== 57) {
+        // CT-e de carga (57) e CT-e OS (67) são documentos distintos, com
+        // raízes próprias. O modelo declarado no XML é a fonte da verdade.
+        const cteOS = raiz.CTeOS?.infCte;
+        const cteCarga = raiz.CTe?.infCte || raiz.infCte;
+
+        if (cteOS || cteCarga) {
+          const infCte = this.no(cteOS || cteCarga);
+          const modeloXmlCte = parseInt(this.texto(this.no(infCte?.ide)?.mod), 10);
+
+          if (modeloXmlCte !== modelo) {
             throw new Error(
-              `Este arquivo é um CT-e (57). Você selecionou ${rotuloModelo(modelo)}.`
+              `Este arquivo é ${rotuloModelo(modeloXmlCte)}. ` +
+                `Você selecionou ${rotuloModelo(modelo)}.`
             );
           }
-          return this.parseCTe(raiz, tipo);
+
+          return this.parseCTe(raiz, tipo, modeloXmlCte as NFeModel);
         }
 
-        if (modelo === 57) {
+        if (modelo === 57 || modelo === 67) {
           throw new Error(
-            `Você selecionou CT-e (57), mas este arquivo não é um CT-e.`
+            `Você selecionou ${rotuloModelo(modelo)}, mas este arquivo não é um CT-e.`
           );
         }
         throw new Error(
@@ -580,8 +592,12 @@ export class NFEParserService {
    * Sem isso, num lote de CT-e recebidos a inferência de entrada e saída não
    * encontraria nenhum lado constante e pediria conferência manual.
    */
-  private async parseCTe(raiz: any, tipo: DocumentType): Promise<NFeDocument> {
-    const cte = this.no(raiz.CTe?.infCte || raiz.infCte);
+  private async parseCTe(
+    raiz: any,
+    tipo: DocumentType,
+    modelo: NFeModel = 57
+  ): Promise<NFeDocument> {
+    const cte = this.no(raiz.CTeOS?.infCte || raiz.CTe?.infCte || raiz.infCte);
     if (!cte) {
       throw new Error('Estrutura de CT-e inválida: elemento infCte não encontrado.');
     }
@@ -606,9 +622,19 @@ export class NFEParserService {
     const seletivo = this.no(gReforma.gIS || imp.IS) || {};
 
     const total = this.numero(vPrest.vTPrest);
+    // No ICMSSN do Simples Nacional não há vBC nem vICMS — só o CST e o
+    // indicador. A base cai para o valor da prestação.
     const baseCalculo = this.numero(icms.vBC) || total;
 
-    // Tomador do serviço, conforme a tag <toma>.
+    /*
+     * Tomador do serviço.
+     *
+     * No CT-e OS não há remetente nem destinatário — o serviço não tem carga
+     * com dois pontos, e o tomador vem declarado direto em <toma>. No CT-e de
+     * carga, a tag <toma> guarda um código apontando para um dos quatro
+     * participantes: 0 remetente, 1 expedidor, 2 recebedor, 3 destinatário.
+     */
+    const tomaDireto = this.no(cte.toma);
     const codigoToma = this.texto(this.no(ide.toma3)?.toma) || this.texto(this.no(ide.toma4)?.toma);
     const participantes: Record<string, any> = {
       '0': this.no(cte.rem),
@@ -616,7 +642,11 @@ export class NFEParserService {
       '2': this.no(cte.receb),
       '3': this.no(cte.dest),
     };
-    const tomador = this.no(participantes[codigoToma]) || this.no(cte.dest) || {};
+    const tomador =
+      (tomaDireto?.CNPJ || tomaDireto?.CPF ? tomaDireto : null) ||
+      this.no(participantes[codigoToma]) ||
+      this.no(cte.dest) ||
+      {};
 
     const valoresDoc = {
       baseCalculo,
@@ -635,8 +665,9 @@ export class NFEParserService {
 
     // O CRT do emitente declara o regime, mais confiável que inferir.
     const crt = this.texto(emit.CRT);
+    const indSN = this.texto(icms.indSN);
     const regimeTributario: RegimeTributario =
-      crt === '1' || crt === '2' ? 'Simples-Nacional' : 'Lucro-Presumido';
+      indSN === '1' || crt === '1' || crt === '2' ? 'Simples-Nacional' : 'Lucro-Presumido';
 
     const dataEmissao = this.texto(ide.dhEmi) || new Date().toISOString();
 
@@ -654,6 +685,7 @@ export class NFEParserService {
       valorTotalServico: this.texto(vPrest.vTPrest) || undefined,
       valorAReceber: this.texto(vPrest.vRec) || undefined,
       totalTributos: this.texto(imp.vTotTrib) || undefined,
+      inss: this.texto(this.no(imp.infTribFed)?.vINSS) || undefined,
       cstReforma: this.texto(reforma.CST) || undefined,
       cClassTrib: this.texto(reforma.cClassTrib) || undefined,
       baseIBSCBS: this.texto(gReforma.vBC) || undefined,
@@ -665,7 +697,7 @@ export class NFEParserService {
 
     return {
       id: uuidv4(),
-      modelo: 57,
+      modelo,
       tipo,
       chaveNFe: (this.texto(cte.$?.Id) || '').replace(/\D/g, '') || this.texto(ide.nCT) || 'N/A',
       dataEmissao,
