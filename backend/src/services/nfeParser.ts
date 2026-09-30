@@ -4,6 +4,7 @@ import { rotuloModelo } from '../utils/modelos';
 import {
   conferirCamposNFe,
   conferirCamposNFSe,
+  conferirCamposCTe,
   type ItemConferido,
 } from './camposTributarios';
 import { v4 as uuidv4 } from 'uuid';
@@ -95,9 +96,17 @@ export class NFEParserService {
       if (!nfe) {
         const ehCTe = Boolean(raiz.CTe?.infCte || raiz.infCte);
         if (ehCTe) {
+          if (modelo !== 57) {
+            throw new Error(
+              `Este arquivo é um CT-e (57). Você selecionou ${rotuloModelo(modelo)}.`
+            );
+          }
+          return this.parseCTe(raiz, tipo);
+        }
+
+        if (modelo === 57) {
           throw new Error(
-            `Este arquivo é um CT-e (57). Você selecionou ${rotuloModelo(modelo)}. ` +
-              'O processamento de CT-e ainda não está disponível.'
+            `Você selecionou CT-e (57), mas este arquivo não é um CT-e.`
           );
         }
         throw new Error(
@@ -555,6 +564,121 @@ export class NFEParserService {
         impostoSeletivo: this.texto(seletivo.vIS) || this.texto(seletivo.pIS) || undefined,
       };
     });
+  }
+
+
+  /**
+   * CT-e — Conhecimento de Transporte Eletrônico.
+   *
+   * Estrutura própria: o valor do serviço está em <vPrest>, os tributos em
+   * <imp>, e não há itens — o documento declara tudo uma vez só.
+   *
+   * O ponto delicado é quem é o tomador. A tag <toma> diz qual dos
+   * participantes contratou o frete: 0 remetente, 1 expedidor, 2 recebedor,
+   * 3 destinatário. É esse CNPJ que vai para cnpjDestino, e não o do
+   * destinatário da carga — quem escritura a despesa é quem tomou o serviço.
+   * Sem isso, num lote de CT-e recebidos a inferência de entrada e saída não
+   * encontraria nenhum lado constante e pediria conferência manual.
+   */
+  private async parseCTe(raiz: any, tipo: DocumentType): Promise<NFeDocument> {
+    const cte = this.no(raiz.CTe?.infCte || raiz.infCte);
+    if (!cte) {
+      throw new Error('Estrutura de CT-e inválida: elemento infCte não encontrado.');
+    }
+
+    const ide = this.no(cte.ide) || {};
+    const emit = this.no(cte.emit) || {};
+    const vPrest = this.no(cte.vPrest) || {};
+    const imp = this.no(cte.imp) || {};
+
+    // O ICMS vive num filho cujo nome varia com a tributação (ICMS00,
+    // ICMS45, ICMSSN...). Pega-se o primeiro.
+    const icmsPai = this.no(imp.ICMS) || {};
+    const icms = this.no(Object.values(icmsPai)[0]) || {};
+
+    // Grupo da reforma. O CT-e aninha os valores um nível mais fundo que a
+    // NF-e: IBSCBS > gIBSCBS > subgrupos.
+    const reforma = this.no(imp.IBSCBS || imp.gIBSCBS) || {};
+    const gReforma = this.no(reforma.gIBSCBS) || reforma;
+    const ibsUF = this.no(gReforma.gIBSUF) || {};
+    const ibsMun = this.no(gReforma.gIBSMun) || {};
+    const cbsGrupo = this.no(gReforma.gCBS) || {};
+    const seletivo = this.no(gReforma.gIS || imp.IS) || {};
+
+    const total = this.numero(vPrest.vTPrest);
+    const baseCalculo = this.numero(icms.vBC) || total;
+
+    // Tomador do serviço, conforme a tag <toma>.
+    const codigoToma = this.texto(this.no(ide.toma3)?.toma) || this.texto(this.no(ide.toma4)?.toma);
+    const participantes: Record<string, any> = {
+      '0': this.no(cte.rem),
+      '1': this.no(cte.exped),
+      '2': this.no(cte.receb),
+      '3': this.no(cte.dest),
+    };
+    const tomador = this.no(participantes[codigoToma]) || this.no(cte.dest) || {};
+
+    const valoresDoc = {
+      baseCalculo,
+      icms: this.numero(icms.vICMS),
+      icmsST: 0,
+      ipi: 0,
+      iss: 0,
+      pis: 0,
+      cofins: 0,
+      irrf: 0,
+      aliquota: this.numero(icms.pICMS),
+      cbs: this.numero(cbsGrupo.vCBS),
+      ibs: this.numero(gReforma.vIBS) || this.numero(ibsUF.vIBSUF) + this.numero(ibsMun.vIBSMun),
+      total,
+    };
+
+    // O CRT do emitente declara o regime, mais confiável que inferir.
+    const crt = this.texto(emit.CRT);
+    const regimeTributario: RegimeTributario =
+      crt === '1' || crt === '2' ? 'Simples-Nacional' : 'Lucro-Presumido';
+
+    const dataEmissao = this.texto(ide.dhEmi) || new Date().toISOString();
+
+    const validacoes = await this.validarConformeReforma(
+      valoresDoc,
+      regimeTributario,
+      new Date(dataEmissao).getFullYear()
+    );
+
+    const camposTributarios = conferirCamposCTe({
+      cstICMS: this.texto(icms.CST) || undefined,
+      baseICMS: this.texto(icms.vBC) || undefined,
+      aliquotaICMS: this.texto(icms.pICMS) || undefined,
+      valorICMS: this.texto(icms.vICMS) || undefined,
+      valorTotalServico: this.texto(vPrest.vTPrest) || undefined,
+      valorAReceber: this.texto(vPrest.vRec) || undefined,
+      totalTributos: this.texto(imp.vTotTrib) || undefined,
+      cstReforma: this.texto(reforma.CST) || undefined,
+      cClassTrib: this.texto(reforma.cClassTrib) || undefined,
+      baseIBSCBS: this.texto(gReforma.vBC) || undefined,
+      ibsEstadual: this.texto(ibsUF.vIBSUF) || undefined,
+      ibsMunicipal: this.texto(ibsMun.vIBSMun) || undefined,
+      cbs: this.texto(cbsGrupo.vCBS) || undefined,
+      impostoSeletivo: this.texto(seletivo.vIS) || undefined,
+    });
+
+    return {
+      id: uuidv4(),
+      modelo: 57,
+      tipo,
+      chaveNFe: (this.texto(cte.$?.Id) || '').replace(/\D/g, '') || this.texto(ide.nCT) || 'N/A',
+      dataEmissao,
+      cnpjEmitente: this.texto(emit.CNPJ) || 'N/A',
+      nomeEmitente: this.texto(emit.xNome) || 'N/A',
+      cnpjDestino: this.texto(tomador.CNPJ) || this.texto(tomador.CPF) || 'N/A',
+      nomeDestino: this.texto(tomador.xNome) || 'Tomador não identificado',
+      regimeTributario,
+      values: valoresDoc,
+      validacoes,
+      divergencias: [],
+      camposTributarios,
+    };
   }
 
   private inferirRegimeTributario(

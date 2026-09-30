@@ -123,6 +123,8 @@ router.post('/nfe', authenticate, upload.single('file'), async (req: Request, re
         const marcasDeValor = [
           'vBC', 'vICMS', 'vNF',
           'ValorServicos', 'ValoresNFSe', 'vServ', 'ValorLiquidoNfse', 'ValorIss', 'ValorISS',
+          // CT-e: o valor do frete vive em <vPrest>.
+          'vTPrest', 'vPrest',
         ];
 
         if (!marcasDeValor.some(m => conteudoXML.includes(m))) {

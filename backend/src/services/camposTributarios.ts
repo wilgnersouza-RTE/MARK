@@ -186,3 +186,48 @@ export function resumoDoPreenchimento(campos: CampoTributario[]): {
 export function rotuloDoModelo(modelo: NFeModel): string {
   return modelo === 'NFSE' ? 'NFS-e' : `modelo ${modelo}`;
 }
+
+// ==================== CT-e ====================
+
+/**
+ * Conferência dos campos de um CT-e.
+ *
+ * O conhecimento de transporte não tem itens: os tributos são declarados uma
+ * vez, no nível do documento. Também não traz PIS e COFINS destacados, então
+ * cobrá-los aqui produziria uma lista de ausências sem significado — a lista
+ * abaixo é a do que o leiaute do CT-e de fato prevê.
+ */
+export function conferirCamposCTe(dados: {
+  cstICMS?: string;
+  baseICMS?: unknown;
+  aliquotaICMS?: unknown;
+  valorICMS?: unknown;
+  valorTotalServico?: unknown;
+  valorAReceber?: unknown;
+  totalTributos?: unknown;
+  cstReforma?: string;
+  cClassTrib?: string;
+  baseIBSCBS?: unknown;
+  ibsEstadual?: unknown;
+  ibsMunicipal?: unknown;
+  cbs?: unknown;
+  impostoSeletivo?: unknown;
+}): CampoTributario[] {
+  return [
+    campoDaNota('atual', 'CST do ICMS', dados.cstICMS),
+    campoDaNota('atual', 'Base de cálculo do ICMS', dados.baseICMS, numeroExibido(dados.baseICMS)),
+    campoDaNota('atual', 'Alíquota do ICMS', dados.aliquotaICMS, numeroExibido(dados.aliquotaICMS, '%')),
+    campoDaNota('atual', 'Valor do ICMS', dados.valorICMS, numeroExibido(dados.valorICMS)),
+    campoDaNota('atual', 'Valor total do serviço', dados.valorTotalServico, numeroExibido(dados.valorTotalServico)),
+    campoDaNota('atual', 'Valor a receber', dados.valorAReceber, numeroExibido(dados.valorAReceber)),
+    campoDaNota('atual', 'Total de tributos', dados.totalTributos, numeroExibido(dados.totalTributos)),
+
+    campoDaNota('reforma', 'CST', dados.cstReforma),
+    campoDaNota('reforma', 'cClassTrib', dados.cClassTrib),
+    campoDaNota('reforma', 'Base de cálculo IBS/CBS', dados.baseIBSCBS, numeroExibido(dados.baseIBSCBS)),
+    campoDaNota('reforma', 'IBS estadual', dados.ibsEstadual, numeroExibido(dados.ibsEstadual)),
+    campoDaNota('reforma', 'IBS municipal', dados.ibsMunicipal, numeroExibido(dados.ibsMunicipal)),
+    campoDaNota('reforma', 'CBS', dados.cbs, numeroExibido(dados.cbs)),
+    campoDaNota('reforma', 'Imposto Seletivo', dados.impostoSeletivo, numeroExibido(dados.impostoSeletivo)),
+  ];
+}
