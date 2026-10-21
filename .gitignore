@@ -28,3 +28,10 @@ npm-debug.log*
 # Uploads temporários
 uploads/
 tmp/
+
+# XMLs reais de clientes, usados só em testes locais. O repositório é público.
+dados-reais/
+
+# ZIPs entram só como exemplo fictício
+*.zip
+!exemplos/*.zip
