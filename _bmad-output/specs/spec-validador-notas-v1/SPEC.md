@@ -78,7 +78,7 @@ Mandato e oportunidade. A Reforma Tributária do Consumo exige campos novos (IBS
 - O percentual do resumo conta só os campos da reforma; hoje o "X de Y" mistura campos atuais e da reforma.
 - O relatório da v1 diagnostica o que falta; dizer como corrigir é a parte que ficou fora.
 - As abas Transição e Regimes saem: a transição saiu do escopo e a composição por regime fica no painel.
-- O Imposto Seletivo só conta como pendência quando o CST indicar incidência.
+- O Imposto Seletivo ausente nunca conta como pendência na v1, porque o XML lido não indica incidência (decisão do usuário).
 - Com o filtro de NCM ativo, NFS-e e CT-e ficam fora do resultado, porque não têm NCM.
 - A organização das telas é proposta do Claude, pedida no briefing: ver `telas-v1.md`.
 

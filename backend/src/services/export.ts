@@ -1,6 +1,46 @@
 import * as XLSX from 'xlsx';
-import { NFeDocument, DashboardData } from '../types';
+import { NFeDocument, DashboardData, EmpresaAnalisada } from '../types';
 import { rotuloSentido } from '../utils/sentidoImportacao';
+import { rotuloModelo } from '../utils/modelos';
+import { FiltrosAnalise } from '../utils/filtros';
+import {
+  ConferenciaReforma,
+  DATA_DE_CORTE_EXIBIDA,
+  TabelaReforma,
+  conferirReforma,
+  consolidadoPorCampo,
+  diaDaNota,
+  formatarDia,
+  rotuloVersao,
+  ehExigivel,
+  resumoPorSentido,
+  tabelaCarregada,
+} from './conferenciaReforma';
+
+/** Recorte e empresa da planilha, impressos no cabeçalho das abas da reforma. */
+export interface ContextoExportacao {
+  filtros?: FiltrosAnalise;
+  empresa?: EmpresaAnalisada;
+  /** Tabela de CST e cClassTrib; padrão, a carregada do arquivo */
+  tabela?: TabelaReforma;
+}
+
+const ROTULO_SENTIDO_FILTRO: Record<string, string> = {
+  entrada: 'Entradas',
+  saida: 'Saídas',
+  indefinido: 'Sem vínculo',
+};
+
+/** "12345678000190" vira "12.345.678/0001-90"; outros formatos ficam como estão. */
+function formatarCNPJ(cnpj: string): string {
+  const d = (cnpj ?? '').replace(/\D/g, '');
+  return d.length === 14
+    ? d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5')
+    : cnpj;
+}
+
+/** Ordem das linhas no relatório: entradas, depois saídas, depois o resto. */
+const ORDEM_SENTIDO: Record<string, number> = { entrada: 0, saida: 1, indefinido: 2 };
 
 export class ExcelExportService {
   /**
@@ -10,12 +50,23 @@ export class ExcelExportService {
     documentos: NFeDocument[],
     dashboard: DashboardData,
     /** false enquanto o contador não escolheu a empresa analisada */
-    temEmpresa: boolean = true
+    temEmpresa: boolean = true,
+    contexto: ContextoExportacao = {}
   ): Buffer {
     const workbook = XLSX.utils.book_new();
 
+    const tabela = contexto.tabela ?? tabelaCarregada();
+    const conferidos = documentos.map(doc => ({
+      doc,
+      tipo: doc.tipo,
+      conferencia: conferirReforma(doc, tabela),
+    }));
+    const cabecalho = this.cabecalhoReforma(contexto, tabela, temEmpresa);
+
     // Adicionar abas
     this.addResumoAba(workbook, dashboard);
+    this.addPendenciasReformaAba(workbook, conferidos, cabecalho, temEmpresa);
+    this.addConsolidadoAba(workbook, conferidos, cabecalho);
     this.addDocumentosAba(workbook, documentos, temEmpresa);
     this.addPorRegimeAba(workbook, dashboard.porRegime);
     this.addPorFornecedorAba(workbook, dashboard.porFornecedor);
@@ -23,6 +74,133 @@ export class ExcelExportService {
     // Gerar buffer
     const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
     return buffer;
+  }
+
+  /** Linhas de identificação: empresa, filtros ativos e versão da tabela. */
+  private cabecalhoReforma(
+    contexto: ContextoExportacao,
+    tabela: TabelaReforma,
+    temEmpresa: boolean
+  ): (string | number)[][] {
+    const filtros = contexto.filtros ?? {};
+    const empresa = contexto.empresa;
+    return [
+      [
+        'Empresa analisada',
+        temEmpresa && empresa ? `${empresa.nome} (${formatarCNPJ(empresa.cnpj)})` : 'Não identificada',
+      ],
+      ['Entrada/Saída', filtros.sentido ? ROTULO_SENTIDO_FILTRO[filtros.sentido] : 'Todas'],
+      ['CFOP', filtros.cfop ?? 'Todos'],
+      ['NCM', filtros.ncm ?? 'Todos'],
+      ['Tabela de cClassTrib', rotuloVersao(tabela.versao)],
+      ['Data de corte', `Notas emitidas a partir de ${DATA_DE_CORTE_EXIBIDA}`],
+    ];
+  }
+
+  /**
+   * Uma linha por nota exigível com pendência ou aviso, entradas antes das
+   * saídas. Notas fora do período ou sem data não entram.
+   */
+  private addPendenciasReformaAba(
+    workbook: XLSX.WorkBook,
+    conferidos: Array<{ doc: NFeDocument; conferencia: ConferenciaReforma }>,
+    cabecalho: (string | number)[][],
+    temEmpresa: boolean
+  ): void {
+    const linhas = conferidos
+      .filter(
+        ({ conferencia: c }) =>
+          ehExigivel(c.situacao) && (c.pendencias.length > 0 || c.avisos.length > 0)
+      )
+      .sort((a, b) => (ORDEM_SENTIDO[a.doc.tipo] ?? 9) - (ORDEM_SENTIDO[b.doc.tipo] ?? 9));
+
+    const data: (string | number)[][] = [
+      ['PENDÊNCIAS DA REFORMA POR NOTA'],
+      [],
+      ...cabecalho,
+      [],
+      [
+        'Sentido',
+        'Tipo',
+        'Número / chave',
+        'Data de emissão',
+        'Emitente',
+        'CNPJ do emitente',
+        'Destinatário / tomador',
+        'Situação',
+        'Pendências',
+        'Avisos',
+      ],
+    ];
+
+    for (const { doc, conferencia } of linhas) {
+      data.push([
+        rotuloSentido(doc.tipo, temEmpresa),
+        rotuloModelo(doc.modelo),
+        doc.chaveNFe,
+        formatarDia(diaDaNota(doc)),
+        doc.nomeEmitente,
+        doc.cnpjEmitente,
+        doc.nomeDestino,
+        conferencia.situacao,
+        conferencia.pendencias
+          .map(p => (p.detalhe ? `${p.texto}: ${p.detalhe}` : p.texto))
+          .join('; '),
+        conferencia.avisos.join('; '),
+      ]);
+    }
+
+    if (linhas.length === 0) {
+      data.push(['Nenhuma nota exigível com pendência ou aviso neste recorte.']);
+    }
+
+    const worksheet = XLSX.utils.aoa_to_sheet(data);
+    worksheet['!cols'] = [
+      { wch: 22 }, { wch: 12 }, { wch: 46 }, { wch: 14 }, { wch: 30 },
+      { wch: 18 }, { wch: 30 }, { wch: 14 }, { wch: 70 }, { wch: 60 },
+    ];
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Pendências da reforma');
+  }
+
+  /** Quantas notas têm cada problema, separado em entradas e saídas. */
+  private addConsolidadoAba(
+    workbook: XLSX.WorkBook,
+    conferidos: Array<{ tipo: NFeDocument['tipo']; conferencia: ConferenciaReforma }>,
+    cabecalho: (string | number)[][]
+  ): void {
+    const exigiveis = conferidos.filter(c => ehExigivel(c.conferencia.situacao));
+    const resumo = resumoPorSentido(
+      exigiveis.map(c => ({ tipo: c.tipo, situacao: c.conferencia.situacao }))
+    );
+    const consolidado = consolidadoPorCampo(exigiveis);
+    const contar = (situacao: string) =>
+      conferidos.filter(c => c.conferencia.situacao === situacao).length;
+
+    const { entrada, saida, semVinculo, total } = resumo;
+    const colunas = ['Entradas', 'Saídas', 'Sem vínculo', 'Total do recorte'];
+
+    const data: (string | number)[][] = [
+      ['CONSOLIDADO POR CAMPO'],
+      [],
+      ...cabecalho,
+      [],
+      ['', ...colunas],
+      ['Notas exigíveis', entrada.total, saida.total, semVinculo.total, total.total],
+      ['Notas completas', entrada.completas, saida.completas, semVinculo.completas, total.completas],
+      [
+        'Percentual de completas',
+        ...[entrada, saida, semVinculo, total].map(r => `${r.percentual}%`),
+      ],
+      [`Fora do período (antes de ${DATA_DE_CORTE_EXIBIDA})`, '', '', '', contar('fora do período')],
+      ['Sem data de emissão', '', '', '', contar('sem data')],
+      [],
+      ['Problema', ...colunas],
+      ...consolidado.map(l => [l.problema, l.entradas, l.saidas, l.semVinculo, l.total]),
+    ];
+
+    const worksheet = XLSX.utils.aoa_to_sheet(data);
+    worksheet['!cols'] = [{ wch: 40 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 18 }];
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Consolidado por campo');
   }
 
   /**
@@ -83,7 +261,7 @@ export class ExcelExportService {
         String(doc.modelo),
         rotuloSentido(doc.tipo, temEmpresa),
         doc.chaveNFe,
-        new Date(doc.dataEmissao).toLocaleDateString('pt-BR'),
+        formatarDia(diaDaNota(doc)),
         `${doc.nomeEmitente} (${doc.cnpjEmitente})`,
         doc.regimeTributario,
         doc.values.baseCalculo.toFixed(2),

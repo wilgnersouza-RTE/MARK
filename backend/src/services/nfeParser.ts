@@ -6,6 +6,7 @@ import {
   conferirCamposCTe,
   type ItemConferido,
 } from './camposTributarios';
+import { diaLocal } from './conferenciaReforma';
 import { v4 as uuidv4 } from 'uuid';
 import { taxRulesService } from './taxRules';
 
@@ -148,9 +149,16 @@ export class NFEParserService {
 
       // Extrair data de emissão (dhEmi na NF-e 4.0, dEmi nas versões antigas)
       const dataEmissaoBruta = this.texto(ide?.dhEmi) || this.texto(ide?.dEmi);
-      const dataEmissao = dataEmissaoBruta
-        ? new Date(dataEmissaoBruta).toISOString()
-        : new Date().toISOString();
+      // Sem data válida no XML, guarda-se o momento da leitura só para não
+      // quebrar quem lê dataEmissao, e a nota fica marcada: a data de corte
+      // da reforma não pode ser aplicada a ela. Data malformada cai aqui em
+      // vez de derrubar a leitura da nota.
+      const { diaEmissao, semDataEmissao } = this.dataDeEmissao(dataEmissaoBruta);
+      const instante = new Date(dataEmissaoBruta);
+      const dataEmissao =
+        !semDataEmissao && !Number.isNaN(instante.getTime())
+          ? instante.toISOString()
+          : new Date().toISOString();
 
       // Validar valores contra reforma tributária
       const validacoes = await this.validarConformeReforma(
@@ -173,8 +181,11 @@ export class NFEParserService {
 
       // Conferência de preenchimento: percorre os itens, onde vivem o CST e
       // o grupo de IBS/CBS.
-      const camposTributarios = conferirCamposNFe(this.lerItens(nfe));
+      const itens = this.lerItens(nfe);
+      const camposTributarios = conferirCamposNFe(itens);
       const { cfops, ncms } = this.lerCodigosDosItens(nfe);
+      // A regra de vínculo CST x cClassTrib vale item a item.
+      const reformaItens = itens.map(i => ({ cst: i.cstReforma, cClassTrib: i.cClassTrib }));
 
       const documento: NFeDocument = {
         id: uuidv4(),
@@ -215,6 +226,9 @@ export class NFEParserService {
         camposTributarios,
         cfops,
         ncms,
+        reformaItens,
+        semDataEmissao,
+        diaEmissao,
       };
 
       return documento;
@@ -225,6 +239,15 @@ export class NFEParserService {
       if (error instanceof Error) throw error;
       throw new Error(`Não foi possível ler o arquivo: ${error?.message ?? error}`);
     }
+  }
+
+  /**
+   * Dia de emissão no fuso do emitente, a partir do texto bruto do XML.
+   * Texto vazio ou data impossível deixa a nota sem data.
+   */
+  private dataDeEmissao(bruto: string): { diaEmissao?: string; semDataEmissao: boolean } {
+    const dia = diaLocal(bruto);
+    return dia ? { diaEmissao: dia, semDataEmissao: false } : { semDataEmissao: true };
   }
 
   /**
@@ -372,9 +395,23 @@ export class NFEParserService {
       'CpfCnpjTomador', 'CPFCNPJTomador', 'CnpjTomador',
     ]);
 
-    const dataEmissao =
-      this.textoDe(raiz, ['DataEmissaoNfse', 'DataEmissaoNFe', 'dhProc', 'dhEmi']) ||
-      new Date().toISOString();
+    // dhProc é a data de processamento, não de emissão: não serve aqui.
+    const dataEmissaoBruta = this.textoDe(raiz, ['DataEmissaoNfse', 'DataEmissaoNFe', 'dhEmi']);
+    const { diaEmissao, semDataEmissao } = this.dataDeEmissao(dataEmissaoBruta);
+    const dataEmissao = (!semDataEmissao && dataEmissaoBruta) || new Date().toISOString();
+
+    // O CST do IBS/CBS vive no grupo IBSCBS e só é lido de lá. Fora dele, uma
+    // tag CST pode ser de outro tributo (PIS, COFINS), e a regra de vínculo
+    // compararia o cClassTrib com o código errado.
+    const grupoReforma = this.buscar(raiz, ['IBSCBS', 'gIBSCBS']);
+    const cstReforma =
+      grupoReforma && typeof grupoReforma === 'object'
+        ? this.textoDe(grupoReforma, ['CST'])
+        : '';
+    const cClassTribReforma =
+      (grupoReforma && typeof grupoReforma === 'object'
+        ? this.textoDe(grupoReforma, ['cClassTrib', 'ClassificacaoTributaria'])
+        : '') || this.textoDe(raiz, ['cClassTrib', 'ClassificacaoTributaria']);
 
     const regimeTributario = this.regimeDaNFSe(raiz);
 
@@ -442,8 +479,8 @@ export class NFEParserService {
       irrf,
       csll,
       inss,
-      cst: this.textoDe(raiz, ['CST']) || undefined,
-      cClassTrib: this.textoDe(raiz, ['cClassTrib', 'ClassificacaoTributaria']) || undefined,
+      cst: cstReforma || undefined,
+      cClassTrib: cClassTribReforma || undefined,
       baseIBSCBS: this.buscar(raiz, ['BaseCalculoIBSCBS']) !== undefined
         ? this.numeroDe(raiz, ['BaseCalculoIBSCBS'])
         : undefined,
@@ -483,6 +520,9 @@ export class NFEParserService {
       // NFS-e não tem CFOP nem NCM.
       cfops: [],
       ncms: [],
+      reformaItens: [{ cst: cstReforma || undefined, cClassTrib: cClassTribReforma || undefined }],
+      semDataEmissao,
+      diaEmissao,
     };
   }
 
@@ -681,7 +721,12 @@ export class NFEParserService {
     const regimeTributario: RegimeTributario =
       indSN === '1' || crt === '1' || crt === '2' ? 'Simples-Nacional' : 'Lucro-Presumido';
 
-    const dataEmissao = this.texto(ide.dhEmi) || new Date().toISOString();
+    const dataEmissaoBruta = this.texto(ide.dhEmi) || this.texto(ide.dEmi);
+    const { diaEmissao, semDataEmissao } = this.dataDeEmissao(dataEmissaoBruta);
+    const dataEmissao = (!semDataEmissao && dataEmissaoBruta) || new Date().toISOString();
+    const cstReforma = this.texto(reforma.CST) || this.texto(gReforma.CST) || undefined;
+    const cClassTribReforma =
+      this.texto(reforma.cClassTrib) || this.texto(gReforma.cClassTrib) || undefined;
 
     const validacoes = await this.validarConformeReforma(
       valoresDoc,
@@ -698,8 +743,8 @@ export class NFEParserService {
       valorAReceber: this.texto(vPrest.vRec) || undefined,
       totalTributos: this.texto(imp.vTotTrib) || undefined,
       inss: this.texto(this.no(imp.infTribFed)?.vINSS) || undefined,
-      cstReforma: this.texto(reforma.CST) || undefined,
-      cClassTrib: this.texto(reforma.cClassTrib) || undefined,
+      cstReforma,
+      cClassTrib: cClassTribReforma,
       baseIBSCBS: this.texto(gReforma.vBC) || undefined,
       ibsEstadual: this.texto(ibsUF.vIBSUF) || undefined,
       ibsMunicipal: this.texto(ibsMun.vIBSMun) || undefined,
@@ -725,6 +770,9 @@ export class NFEParserService {
       // O CT-e declara um CFOP só, o da operação, e não tem NCM.
       cfops: this.unicos([this.texto(ide.CFOP)]),
       ncms: [],
+      reformaItens: [{ cst: cstReforma, cClassTrib: cClassTribReforma }],
+      semDataEmissao,
+      diaEmissao,
     };
   }
 
