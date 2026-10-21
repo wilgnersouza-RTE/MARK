@@ -52,9 +52,8 @@ npm run dev
 
 Abra http://localhost:3000.
 
-O login é simulado: qualquer e-mail válido entra e a sessão é criada a partir
-dele. Não há banco de dados — trocar isso por autenticação real é o passo
-descrito no `DEVELOPMENT.md`.
+Na primeira vez, a tela pede para criar uma conta; a primeira conta vira
+administradora. Detalhes na seção **Autenticação**, mais abaixo.
 
 ## 3. Docker (opcional)
 
@@ -81,9 +80,14 @@ Se mudar a porta do backend, atualize `VITE_API_URL` no `frontend/.env` **e**
 
 ## Endpoints
 
-Todas as rotas abaixo de `/api/v1` exigem o header `Authorization: Bearer <token>`.
-O `x-session-id` é devolvido no login e deve acompanhar as chamadas de upload,
-dashboard e export.
+Todas as rotas abaixo de `/api/v1` exigem o header `Authorization: Bearer <token>`,
+menos as marcadas como públicas. O `x-session-id` é devolvido no login e deve
+acompanhar as chamadas de upload, dashboard e export.
+
+As rotas de dashboard (menos `/filtros`) e o `/export/excel` aceitam os filtros
+da análise na query string: `?sentido=entrada|saida|indefinido&cfop=5102&ncm=84713012`.
+Valor ausente ou inválido vale como "todos". O CFOP é o do emitente, como
+consta no XML.
 
 ### Autenticação
 | Método | Rota                        | Descrição                          |
@@ -96,27 +100,40 @@ dashboard e export.
 ### Upload
 | Método | Rota                            | Descrição                              |
 | ------ | ------------------------------- | -------------------------------------- |
-| POST   | `/api/v1/upload/nfe`            | ZIP com XMLs (`tipo`, `modelo`, `file`) |
+| POST   | `/api/v1/upload/nfe`            | ZIP com XMLs (só o campo `file`)       |
+| POST   | `/api/v1/upload/empresa`        | Troca a empresa analisada (`{ cnpj }`) |
 | POST   | `/api/v1/upload/clear-session`  | Limpa os documentos da sessão           |
 | GET    | `/api/v1/upload/session-stats`  | Estatísticas da sessão                  |
+
+O upload não pede tipo nem modelo. O modelo de cada XML (NF-e, NFC-e, CT-e,
+CT-e OS, NFS-e) é lido da própria estrutura, a empresa analisada é o CNPJ
+presente em pelo menos 80% das notas, e cada nota vira entrada (a empresa é
+destinatária ou tomadora), saída (a empresa é emitente) ou sem vínculo. Quando
+a empresa não é clara, a resposta traz `precisaEscolherEmpresa` e os
+`candidatosEmpresa`.
 
 ### Dashboard
 | Método | Rota                               | Descrição                    |
 | ------ | ---------------------------------- | ---------------------------- |
 | GET    | `/api/v1/dashboard`                | Análise completa             |
 | GET    | `/api/v1/dashboard/resumo`         | Resumo geral                 |
-| GET    | `/api/v1/dashboard/divergencias`   | Divergências encontradas     |
 | GET    | `/api/v1/dashboard/regimes`        | Consolidado por regime       |
 | GET    | `/api/v1/dashboard/fornecedores`   | Top fornecedores             |
-| GET    | `/api/v1/dashboard/transicao`      | Transição 2024-2027          |
 | GET    | `/api/v1/dashboard/documentos`     | Documentos (com paginação)   |
+| GET    | `/api/v1/dashboard/campos`         | Conferência da reforma por nota |
+| GET    | `/api/v1/dashboard/filtros`        | CFOPs e NCMs do lote, com quantidade |
 
 ### Export
 | Método | Rota                                | Descrição              |
 | ------ | ----------------------------------- | ---------------------- |
-| GET    | `/api/v1/export/excel`              | Planilha com 6 abas    |
-| GET    | `/api/v1/export/json`               | JSON completo          |
-| GET    | `/api/v1/export/csv-divergencias`   | CSV das divergências   |
+| GET    | `/api/v1/export/excel`              | Planilha do recorte filtrado |
+| GET    | `/api/v1/export/json`               | JSON completo (sem filtros) |
+| POST   | `/api/v1/export/erros-importacao`   | Planilha dos XMLs recusados |
+
+O Excel traz as abas Resumo, Documentos, Por Regime, Fornecedores,
+Pendências da reforma e Consolidado por campo. As duas últimas têm no
+cabeçalho a empresa analisada, os filtros usados, a versão da tabela de
+cClassTrib e a data de corte.
 
 ### Tributação (rotas públicas)
 | Método | Rota                                  | Descrição                |
@@ -143,7 +160,7 @@ SID=$(echo "$LOGIN" | python3 -c "import sys,json;print(json.load(sys.stdin)['da
 # 2. Upload de um ZIP com XMLs
 curl -X POST http://localhost:5000/api/v1/upload/nfe \
   -H "Authorization: Bearer $TOKEN" -H "x-session-id: $SID" \
-  -F "file=@suas-notas.zip" -F "tipo=entrada" -F "modelo=55"
+  -F "file=@suas-notas.zip"
 
 # 3. Resumo
 curl http://localhost:5000/api/v1/dashboard/resumo \
@@ -164,9 +181,10 @@ apenas assinada (raiz `<NFe>`), com ou sem prefixo de namespace. Os valores
 vêm de `total/ICMSTot` e a data de emissão aceita `dhEmi` (NF-e 4.0) e `dEmi`
 (versões antigas).
 
-O `modelo` informado no upload precisa bater com a tag `<mod>` do XML, senão o
-arquivo é rejeitado com o erro correspondente — os demais XMLs do ZIP continuam
-sendo processados normalmente.
+O mesmo ZIP pode misturar NF-e (55), NFC-e (65), CT-e (57), CT-e OS (67) e
+NFS-e, de entrada e de saída. Um XML que não é nenhum desses documentos, ou que
+está corrompido, é recusado com o motivo; os demais XMLs do ZIP continuam sendo
+processados normalmente.
 
 ---
 
@@ -185,10 +203,12 @@ A tela de importação segue o Validador da Reforma Tributária do Consumo da
 SEFAZ (Informe Técnico 2025.002). Os códigos vêm de `backend/data/cclasstrib.json`,
 não do código-fonte, porque a SEFAZ republica a tabela a cada poucos meses.
 
-**O arquivo que acompanha o projeto é parcial** — contém apenas os códigos de
-referência. Para carregar a tabela oficial completa:
+O arquivo do projeto traz a tabela oficial do Informe Técnico 2025.002,
+versão 1.70 (173 cClassTrib e 18 CST). Quando o Portal publicar outra versão:
 
-1. Baixe a planilha no Portal Nacional da NF-e (aba Documentos > Diversos).
+1. Baixe a planilha no Portal Nacional da NF-e (aba Documentos > Diversos),
+   mantendo o nome original do arquivo, que traz a versão
+   (ex.: `IT 2025.002 v.1.70 - cClassTrib.xlsx`).
 2. Rode:
 
 ```bash
@@ -196,8 +216,10 @@ cd backend
 npm run importar:cclasstrib -- /caminho/da/tabela-cclasstrib.xlsx
 ```
 
-O script reconhece as colunas pelo nome, em qualquer ordem, e reporta a
-distribuição de códigos por CST ao final.
+O script reconhece as colunas pelo nome, em qualquer ordem, importa as abas de
+cClassTrib (com a vigência) e de CST (com os grupos exigidos), grava a versão
+lida do nome do arquivo e reporta a distribuição de códigos por CST ao final.
+Reinicie o backend para ele ler a tabela nova.
 
 ### Endpoints
 
@@ -217,42 +239,29 @@ API rejeita combinações cruzadas.
 
 ---
 
-## Simulação da Reforma Tributária (2026-2033)
+## Conferência da Reforma Tributária
 
-A aba **Reforma 2027-2033** simula a carga tributária de cada ano da transição,
-e a aba **Divergências** permite recalcular as ocorrências pela legislação de
-qualquer ano do período.
+O Painel mostra, em cartões de Entradas e Saídas, o percentual de notas com os
+campos da reforma completos, e a lista de notas com o que falta em cada uma.
+O Excel traz a mesma conferência nas abas **Pendências da reforma** e
+**Consolidado por campo**.
 
-### O que vem da lei e o que é estimativa
+### Regras
 
-| Item | Origem |
-| ---- | ------ |
-| Fatores de transição (ICMS/ISS a 90%, 80%, 70%, 60%, extinção) | EC 132/2023 e LC 214/2025 |
-| Extinção de PIS/Cofins e IPI zerado em 2027 | LC 214/2025 |
-| IBS a 0,1% em 2026-2028 | LC 214/2025 |
-| **Alíquota do IVA (28%) e do Imposto Seletivo** | **Estimativa — pendente de resolução do Senado (art. 349)** |
+| Situação | Quando |
+| -------- | ------ |
+| Completa | CST do IBS/CBS, cClassTrib, base de cálculo, IBS estadual, IBS municipal e CBS presentes (em NF-e e NFC-e, em todos os itens) e cClassTrib compatível com o CST |
+| Com pendência | Falta algum desses campos, ou os três primeiros dígitos do cClassTrib diferem do CST |
+| Fora do período | Emissão antes de 01/01/2026 |
+| Sem data | O XML não traz data de emissão válida |
 
-Por isso as alíquotas são **parâmetro editável na tela**, não constante do
-sistema. O arquivo `backend/data/reforma-transicao.json` tem os campos
-`revisadoPor` e `revisadoEm`, hoje nulos: preencha-os quando o time tributário
-validar os números, e o aviso da interface deixa de aparecer.
-
-### Endpoints
-
-| Método | Rota                                   | Descrição                          |
-| ------ | -------------------------------------- | ---------------------------------- |
-| GET    | `/api/v1/reforma/metadados`            | Anos, regimes e avisos             |
-| GET    | `/api/v1/reforma/simulacao?ano=2033`   | Simulação de um ano                |
-| GET    | `/api/v1/reforma/serie`                | Série 2026-2033 para gráficos      |
-| GET    | `/api/v1/reforma/divergencias?ano=`    | Divergências recalculadas por ano  |
-
-Parâmetros aceitos: `iva`, `cbs`, `is`, `regime`, `sujeitoIS`.
-
-### O que não é calculado
-
-**Tributos em cadeia (resíduo tributário).** Exige matriz insumo-produto por
-CNAE, que o XML da NF-e não fornece. A tela declara isso explicitamente em vez
-de exibir um número estimado sem lastro.
+- Só "Completa" e "Com pendência" entram no percentual.
+- A data de emissão é lida no fuso do próprio XML, sem conversão.
+- Imposto Seletivo ausente nunca é pendência: o XML não indica se ele incide
+  sobre o item. Aparece só como informativo.
+- Código de CST ou cClassTrib fora da tabela carregada gera aviso com a versão
+  da tabela, nunca pendência. A vigência do cClassTrib é comparada com a data de
+  emissão da nota.
 
 ---
 
@@ -339,20 +348,24 @@ Enquanto os arquivos não existirem, gradientes equivalentes aparecem no lugar
 
 ## Painel executivo
 
-A aba **Painel** é a tela inicial: layout denso no estilo BI, com cabeçalho
-compacto, chips de filtro, alertas, KPIs, heatmap e tabelas.
+A tela tem duas abas, **Painel** e **Regimes**, abaixo do cartão **Filtros da
+análise** (Entrada/Saída, CFOP do emitente e NCM). A seleção vale para os
+indicadores do topo, as duas abas, a conferência da reforma e o botão
+Exportar, e continua a mesma ao trocar de aba. Sem empresa analisada, o filtro
+abre em "Todas"; com empresa e alguma entrada, em "Entradas/Compras".
 
-Diferença importante em relação às outras abas: o painel **baixa os documentos
-uma vez e calcula tudo no navegador**. Os filtros de regime e tipo respondem na
-hora, sem nova chamada ao servidor. Para bases muito grandes (acima de ~5.000
-notas), vale mover essas agregações para o backend.
+O Painel traz, nesta ordem: os cartões da conferência da reforma, o painel
+executivo (alertas, KPIs, participação por tributo, fornecedores por valor e
+composição por regime), o bloco **Resumo** com a distribuição de tributos e a
+lista de notas da conferência.
+
+O painel executivo baixa os documentos do recorte e calcula no navegador; os
+chips de Regime dentro dele respondem na hora. Para bases muito grandes (acima
+de ~5.000 notas), vale mover essas agregações para o backend.
 
 Os alertas do topo são gerados a partir dos próprios dados — concentração em um
-fornecedor, participação do Simples Nacional, variação de tributos no período e
-volume de divergências. Não são textos fixos.
-
-O heatmap cruza tributo × ano da transição: azul indica avanço, rosa indica
-recuo, e o valor em reais aparece ao passar o mouse.
+fornecedor, participação do Simples Nacional e variação de tributos no período.
+Não são textos fixos.
 
 
 ---

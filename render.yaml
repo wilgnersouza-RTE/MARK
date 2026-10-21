@@ -50,7 +50,7 @@ services:
       - key: CORS_ORIGIN
         value: https://mark-six-navy.vercel.app
 
-      # As tabelas fiscais (tax-rules, cclasstrib, reforma-transicao) vêm do
+      # As tabelas fiscais (tax-rules, cclasstrib) vêm do
       # repositório — NÃO aponte DATA_DIR para o disco, senão elas somem.
       # Deixando sem definir, o backend usa backend/data do próprio código.
 

@@ -139,7 +139,7 @@ O backend usa dois diretórios diferentes, e confundi-los quebra a aplicação:
 
 | Variável | Conteúdo | Onde deve apontar |
 | -------- | -------- | ----------------- |
-| `DATA_DIR` | Tabelas fiscais (`tax-rules.json`, `cclasstrib.json`, `reforma-transicao.json`) | **Não defina.** Vêm versionadas com o código, em `backend/data` |
+| `DATA_DIR` | Tabelas fiscais (`tax-rules.json`, `cclasstrib.json`) | **Não defina.** Vêm versionadas com o código, em `backend/data` |
 | `WRITABLE_DIR` | `usuarios.json`, gravado em execução | Disco persistente (`/var/dados` no `render.yaml`) |
 
 Apontar `DATA_DIR` para o disco montado faria as tabelas fiscais sumirem, já que
@@ -151,9 +151,9 @@ o disco começa vazio. Deixar os usuários fora do disco os apagaria a cada depl
   `render.yaml` ele é gerado automaticamente, o que já resolve.
 - **Faça backup de `data/usuarios.json`.** É um arquivo, não um banco: não tem
   transação nem réplica.
-- **Substitua a tabela cClassTrib pela oficial**
-  (`npm run importar:cclasstrib`) — o arquivo incluído é apenas uma amostra.
-- **Valide as alíquotas** de `data/reforma-transicao.json` com o time
-  tributário e preencha `revisadoPor` e `revisadoEm`.
+- **Mantenha a tabela cClassTrib atualizada.** O repositório traz a versão
+  oficial 1.70 do Informe Técnico 2025.002. Quando o Portal Nacional da NF-e
+  publicar outra, baixe a planilha e rode `npm run importar:cclasstrib`; o
+  backend só lê a tabela nova depois de reiniciar.
 - **Considere migrar sessões e usuários** para Redis e banco de dados antes de
   abrir para vários usuários simultâneos.
