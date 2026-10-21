@@ -25,3 +25,6 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-validador-v1-painel-e-filtros.md`
   summary: Decidir se backend/data/reforma-transicao.json sai do repositório.
   evidence: único leitor (services/reforma.ts) foi removido; AGENTS.md proíbe editar à mão, exclusão exige confirmação do usuário.
+- source_spec: `_bmad-output/implementation-artifacts/spec-validador-v1-conferencia-tributos.md`
+  summary: Ler os campos da reforma da NFS-e padrão nacional (grupo IBSCBS com vBC, gIBSUF, gIBSMun, gCBS) quando houver XML real desse leiaute.
+  evidence: o lote real só tem leiautes municipal e Paulistana; sem exemplo verdadeiro, o nome das tags seria suposição.

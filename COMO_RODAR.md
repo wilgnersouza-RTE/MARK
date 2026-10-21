@@ -120,7 +120,7 @@ a empresa não é clara, a resposta traz `precisaEscolherEmpresa` e os
 | GET    | `/api/v1/dashboard/regimes`        | Consolidado por regime       |
 | GET    | `/api/v1/dashboard/fornecedores`   | Top fornecedores             |
 | GET    | `/api/v1/dashboard/documentos`     | Documentos (com paginação)   |
-| GET    | `/api/v1/dashboard/campos`         | Conferência da reforma por nota |
+| GET    | `/api/v1/dashboard/campos`         | Conferência de tributos por nota |
 | GET    | `/api/v1/dashboard/filtros`        | CFOPs e NCMs do lote, com quantidade |
 
 ### Export
@@ -131,9 +131,20 @@ a empresa não é clara, a resposta traz `precisaEscolherEmpresa` e os
 | POST   | `/api/v1/export/erros-importacao`   | Planilha dos XMLs recusados |
 
 O Excel traz as abas Resumo, Documentos, Por Regime, Fornecedores,
-Pendências da reforma e Consolidado por campo. As duas últimas têm no
+Pendências de tributos e Consolidado por campo. As duas últimas têm no
 cabeçalho a empresa analisada, os filtros usados, a versão da tabela de
-cClassTrib e a data de corte.
+cClassTrib e a data de corte. A aba Pendências de tributos tem uma linha por
+nota com as colunas Leiaute e Código do serviço (só NFS-e, com o tipo do
+código: cTribNac, item da LC 116 ou código municipal), Situação, Tipo de
+problema (ausente, parcial, zerado, incompatível), Resumo (a nota numa
+frase), Pendências (cada uma com o seu tipo entre colchetes) e Avisos. O
+Consolidado por campo conta as notas por campo e tipo de problema, em
+linhas como "CBS: ausente" e "CBS: zerado".
+
+A rota `/api/v1/dashboard/campos` devolve, em cada nota, além de situação,
+pendências e avisos: `resumo`, `tipos`, `leiaute`, `codigoServico`,
+`tipoCodigoServico` e os campos com alíquota, base e valor como estão no XML
+(`aliquota`, `base`, `valorNumerico`), `zerado` e `zeroAceito`.
 
 ### Tributação (rotas públicas)
 | Método | Rota                                  | Descrição                |
@@ -243,7 +254,7 @@ API rejeita combinações cruzadas.
 
 O Painel mostra, em cartões de Entradas e Saídas, o percentual de notas com os
 campos da reforma completos, e a lista de notas com o que falta em cada uma.
-O Excel traz a mesma conferência nas abas **Pendências da reforma** e
+O Excel traz a mesma conferência nas abas **Pendências de tributos** e
 **Consolidado por campo**.
 
 ### Regras
@@ -251,11 +262,18 @@ O Excel traz a mesma conferência nas abas **Pendências da reforma** e
 | Situação | Quando |
 | -------- | ------ |
 | Completa | CST do IBS/CBS, cClassTrib, base de cálculo, IBS estadual, IBS municipal e CBS presentes (em NF-e e NFC-e, em todos os itens) e cClassTrib compatível com o CST |
-| Com pendência | Falta algum desses campos, ou os três primeiros dígitos do cClassTrib diferem do CST |
+| Com pendência | Falta algum desses campos (ausente, ou parcial em NF-e e NFC-e), algum campo de valor (base, IBS estadual, IBS municipal ou CBS) veio com zero, ou os três primeiros dígitos do cClassTrib diferem do CST |
 | Fora do período | Emissão antes de 01/01/2026 |
 | Sem data | O XML não traz data de emissão válida |
 
 - Só "Completa" e "Com pendência" entram no percentual.
+- Campo de valor (base, IBS estadual, IBS municipal, CBS) informado com zero
+  é pendência do tipo "zerado", com duas exceções: o CST do item está na
+  tabela e não exige o grupo padrão (imunidade, não incidência); ou é o IBS
+  municipal de nota emitida em 2026, quando só há alíquota estadual (LC
+  214/2025, art. 343). A partir de 2027 o IBS municipal zerado volta a ser
+  pendência. IBS municipal ausente é pendência sempre. Na tela, zero aceito
+  aparece como "zero aceito", sem alerta.
 - A data de emissão é lida no fuso do próprio XML, sem conversão.
 - Imposto Seletivo ausente nunca é pendência: o XML não indica se ele incide
   sobre o item. Aparece só como informativo.

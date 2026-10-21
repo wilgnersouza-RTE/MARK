@@ -319,3 +319,41 @@ describe('GET /dashboard/campos: conferência da reforma', () => {
     expect(corpo.data.temEmpresa).toBe(false);
   });
 });
+
+describe('GET /dashboard/campos: tipos, resumo, leiaute e código do serviço', () => {
+  const NFSE_ZERADA = `<?xml version="1.0" encoding="UTF-8"?>
+<NFSe>
+  <Numero>7</Numero>
+  <DataEmissaoNfse>2026-03-05T09:00:00</DataEmissaoNfse>
+  <CpfCnpjPrestador>${OUTRO}</CpfCnpjPrestador>
+  <RazaoSocialPrestador>PRESTADOR FICTICIO</RazaoSocialPrestador>
+  <CpfCnpjTomador>${EMPRESA}</CpfCnpjTomador>
+  <Servicos><CodigoTributacaoMunicipio>010701</CodigoTributacaoMunicipio></Servicos>
+  <ValoresNFSe>
+    <ValorServicos>1000.00</ValorServicos><BaseCalculo>1000.00</BaseCalculo><ValorIss>25.00</ValorIss>
+    <CBS><Aliquota>0</Aliquota><Vlr>0</Vlr></CBS>
+    <IBS><BaseCalculo>0</BaseCalculo><AliquotaEstadual>0</AliquotaEstadual><AliquotaMunicipal>0</AliquotaMunicipal><Vlr>0</Vlr></IBS>
+  </ValoresNFSe>
+</NFSe>`;
+
+  it('leva os tipos de problema, o resumo, o leiaute e o código do serviço', async () => {
+    const { nfeParserService } = await import('../services/nfeParser');
+    const doc = await nfeParserService.parseNFE(NFSE_ZERADA);
+    const cabecalhos = await sessaoComLote([doc], true);
+    const { corpo } = await get('/campos', cabecalhos);
+
+    const nota = corpo.data.notas[0];
+    expect(nota.tipos).toEqual(['ausente', 'zerado']);
+    expect(nota.resumo).toMatch(/^5 pendências: faltam CST do IBS\/CBS e cClassTrib; /);
+    expect(nota.tipoCodigoServico).toBe('código de tributação municipal');
+    expect(nota.leiaute).toBe('Municipal (raiz NFSe)');
+    expect(nota.codigoServico).toBe('010701');
+    const cbs = nota.campos.find((c: any) => c.grupo === 'reforma' && c.campo === 'CBS');
+    expect(cbs).toEqual(expect.objectContaining({ aliquota: 0, valorNumerico: 0, zerado: true }));
+    expect(nota.pendencias.filter((p: any) => p.problema === 'zerado')).toHaveLength(3);
+    expect(cbs.zeroAceito).toBeUndefined();
+    // IBS municipal zero em 2026 é aceito: a tela recebe a marca neutra
+    const municipal = nota.campos.find((c: any) => c.grupo === 'reforma' && c.campo === 'IBS municipal');
+    expect(municipal).toEqual(expect.objectContaining({ zerado: true, zeroAceito: true }));
+  });
+});
