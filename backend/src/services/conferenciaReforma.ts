@@ -9,8 +9,10 @@ import { rtcService } from './rtc';
  * `_bmad-output/specs/spec-validador-notas-v1/campos-reforma.md`:
  *
  * - só notas emitidas a partir de 01/01/2026 são conferidas;
- * - pendência é campo ausente (em NF-e e NFC-e, ausente em algum item) ou
- *   cClassTrib cujos três primeiros dígitos diferem do CST;
+ * - pendência é campo ausente (em NF-e e NFC-e, ausente em algum item),
+ *   campo de valor informado com zero (salvo quando o CST está na tabela e
+ *   não exige o grupo padrão, como imunidade e não incidência) ou cClassTrib
+ *   cujos três primeiros dígitos diferem do CST;
  * - código fora da tabela carregada é aviso, nunca pendência, porque a
  *   tabela em `backend/data/cclasstrib.json` pode ser parcial;
  * - Imposto Seletivo ausente é só informativo na v1.
@@ -20,14 +22,39 @@ import { rtcService } from './rtc';
 
 export type SituacaoReforma = 'completa' | 'com pendência' | 'fora do período' | 'sem data';
 
+/**
+ * Tipo de problema de uma pendência: campo ausente, informado com zero,
+ * presente só em parte dos itens (NF-e e NFC-e) ou cClassTrib incompatível
+ * com o CST.
+ */
+export type TipoProblema = 'ausente' | 'zerado' | 'parcial' | 'incompativel';
+
+/** Ordem única dos tipos: selos, resumo, relatório e consolidado. */
+export const ORDEM_PROBLEMAS: TipoProblema[] = ['ausente', 'parcial', 'zerado', 'incompativel'];
+
+/** Rótulo de cada tipo, para selos e relatório. */
+export const ROTULO_PROBLEMA: Record<TipoProblema, string> = {
+  ausente: 'ausente',
+  zerado: 'zerado',
+  parcial: 'parcial',
+  incompativel: 'incompatível',
+};
+
 export interface PendenciaReforma {
   /** Nome do campo, como o contador o conhece */
   campo: string;
-  problema: 'ausente' | 'incompativel';
+  problema: TipoProblema;
   /** Texto exibido na tela e no relatório */
   texto: string;
   /** Códigos envolvidos, quando ajudam a localizar o problema */
   detalhe?: string;
+  /** Em NF-e com zero em parte dos itens: "2 de 3 itens" */
+  contagem?: string;
+  /**
+   * Outros tipos do mesmo campo, quando a pendência junta dois: campo em
+   * parte dos itens e zerado em alguns deles vira uma pendência só.
+   */
+  tambem?: TipoProblema[];
 }
 
 export interface ConferenciaReforma {
@@ -35,6 +62,15 @@ export interface ConferenciaReforma {
   pendencias: PendenciaReforma[];
   avisos: string[];
   informativos: string[];
+  /** Tipos de problema presentes nas pendências, sem repetição */
+  tipos: TipoProblema[];
+  /** Situação da nota numa frase, para a tela e o relatório */
+  resumo: string;
+  /**
+   * Campos (pelo nome de camposTributarios) que vieram com zero e em que
+   * todo zero foi aceito: CST sem grupo padrão ou IBS municipal em 2026.
+   */
+  zerosAceitos: string[];
 }
 
 /** O que a conferência precisa saber da tabela de CST e cClassTrib. */
@@ -42,10 +78,22 @@ export interface TabelaReforma {
   versao: string;
   temCST(codigo: string): boolean;
   obterCClassTrib(codigo: string): { fimVigencia?: string } | null;
+  /**
+   * Se o CST exige o grupo padrão de IBS/CBS; null quando o CST não está na
+   * tabela. Sem a função, todo CST conta como fora da tabela.
+   */
+  exigeGrupoPadrao?(codigo: string): boolean | null;
 }
 
 /** Data de corte da exigência dos campos da reforma. */
 export const DATA_DE_CORTE = '2026-01-01';
+
+/**
+ * Primeiro dia em que o IBS municipal zerado volta a ser pendência. Em 2026
+ * só há alíquota estadual de teste (LC 214/2025, art. 343), e o IBS
+ * municipal informado com zero é o esperado. Ausente continua pendência.
+ */
+export const INICIO_IBS_MUNICIPAL = '2027-01-01';
 
 export const TEXTO_INCOMPATIVEL = 'cClassTrib incompatível com o CST';
 export const AVISO_SEM_DATA =
@@ -57,22 +105,23 @@ export const INFORMATIVO_SELETIVO =
  * Os seis campos que decidem a completude, na ordem de `campos-reforma.md`.
  * `campo` é o nome usado em camposTributarios; `nome`, o exibido.
  */
-const CAMPOS_EXIGIDOS: Array<{ campo: string; nome: string }> = [
+const CAMPOS_EXIGIDOS: Array<{ campo: string; nome: string; deValor?: true; feminino?: true }> = [
   { campo: 'CST', nome: 'CST do IBS/CBS' },
   { campo: 'cClassTrib', nome: 'cClassTrib' },
-  { campo: 'Base de cálculo IBS/CBS', nome: 'Base de cálculo do IBS/CBS' },
-  { campo: 'IBS estadual', nome: 'IBS estadual (UF)' },
-  { campo: 'IBS municipal', nome: 'IBS municipal' },
-  { campo: 'CBS', nome: 'CBS' },
+  { campo: 'Base de cálculo IBS/CBS', nome: 'Base de cálculo do IBS/CBS', deValor: true, feminino: true },
+  { campo: 'IBS estadual', nome: 'IBS estadual (UF)', deValor: true },
+  { campo: 'IBS municipal', nome: 'IBS municipal', deValor: true },
+  { campo: 'CBS', nome: 'CBS', deValor: true, feminino: true },
 ];
+
+const NOMES_FEMININOS = new Set(CAMPOS_EXIGIDOS.filter(c => c.feminino).map(c => c.nome));
+
+/** "CBS informada com valor zero", "IBS municipal informado com valor zero". */
+function textoZerado(nome: string, feminino?: boolean): string {
+  return `${nome} ${feminino ? 'informada' : 'informado'} com valor zero`;
+}
 
 const CAMPO_SELETIVO = 'Imposto Seletivo';
-
-/** Nomes dos problemas possíveis, na ordem do consolidado. */
-export const PROBLEMAS_POSSIVEIS: string[] = [
-  ...CAMPOS_EXIGIDOS.map(c => c.nome),
-  TEXTO_INCOMPATIVEL,
-];
 
 /** Versão exibida quando a tabela não pôde ser lida. */
 export const VERSAO_INDISPONIVEL = 'indisponível';
@@ -87,6 +136,7 @@ const TABELA_VAZIA: TabelaReforma = {
   versao: VERSAO_INDISPONIVEL,
   temCST: () => false,
   obterCClassTrib: () => null,
+  exigeGrupoPadrao: () => null,
 };
 
 /**
@@ -99,6 +149,7 @@ export function tabelaCarregada(): TabelaReforma {
       versao: rtcService.obterMetadados().versaoTabela,
       temCST: codigo => rtcService.obterCSTPorCodigo(codigo) !== null,
       obterCClassTrib: codigo => rtcService.obterCClassTribPorCodigo(codigo),
+      exigeGrupoPadrao: codigo => rtcService.obterCSTPorCodigo(codigo)?.exigeGrupoPadrao ?? null,
     };
   } catch (e: any) {
     console.error(`Tabela de cClassTrib indisponível: ${e?.message ?? e}`);
@@ -166,12 +217,70 @@ function campoDe(campos: CampoTributario[], nome: string): CampoTributario | und
 function pendenciaDeAusencia(campo: CampoTributario | undefined, nome: string): PendenciaReforma | null {
   if (campo?.situacao === 'preenchido') return null;
   const itens = campo?.itens;
-  const texto =
-    campo?.situacao === 'parcial' && itens
-      ? `${nome} (${itens.com} de ${itens.total} itens)`
-      : nome;
-  return { campo: nome, problema: 'ausente', texto };
+  if (campo?.situacao === 'parcial' && itens) {
+    return { campo: nome, problema: 'parcial', texto: `${nome} (${itens.com} de ${itens.total} itens)` };
+  }
+  return { campo: nome, problema: 'ausente', texto: nome };
 }
+
+/** Lista em português: "a", "a e b", "a, b e c". */
+function emLista(nomes: string[]): string {
+  if (nomes.length <= 1) return nomes.join('');
+  return `${nomes.slice(0, -1).join(', ')} e ${nomes[nomes.length - 1]}`;
+}
+
+/** Tipos de uma pendência: o principal e os que ela junta. */
+const tiposDa = (p: PendenciaReforma): TipoProblema[] => [p.problema, ...(p.tambem ?? [])];
+
+/**
+ * A nota numa frase, como o contador diria, na ordem de ORDEM_PROBLEMAS:
+ * o que falta, o que está em parte dos itens, o que veio zerado e o que
+ * não combina. Contagens por item e códigos incompatíveis são mantidos.
+ */
+function resumirPendencias(pendencias: PendenciaReforma[], avisos: string[]): string {
+  if (pendencias.length === 0) {
+    const base = 'Campos da reforma completos e cClassTrib compatível com o CST';
+    return avisos.length > 0
+      ? `${base}, com ${avisos.length} aviso${avisos.length === 1 ? '' : 's'} sobre a tabela.`
+      : `${base}.`;
+  }
+  const doTipo = (tipo: TipoProblema) => pendencias.filter(p => p.problema === tipo);
+  const partes: Record<TipoProblema, string | null> = {
+    ausente: null,
+    parcial: null,
+    zerado: null,
+    incompativel: null,
+  };
+
+  const ausentes = doTipo('ausente').map(p => p.campo);
+  if (ausentes.length > 0) {
+    partes.ausente = `${ausentes.length === 1 ? 'falta' : 'faltam'} ${emLista(ausentes)}`;
+  }
+  const parciais = doTipo('parcial').map(p => p.texto);
+  if (parciais.length > 0) partes.parcial = `só em parte dos itens: ${emLista(parciais)}`;
+
+  const zerados = doTipo('zerado');
+  if (zerados.length === 1) {
+    partes.zerado = zerados[0].texto;
+  } else if (zerados.length > 1) {
+    const femininos = zerados.every(p => NOMES_FEMININOS.has(p.campo));
+    const nomes = zerados.map(p => (p.contagem ? `${p.campo} (${p.contagem})` : p.campo));
+    partes.zerado = `${emLista(nomes)} ${femininos ? 'informadas' : 'informados'} com valor zero`;
+  }
+  const incompativel = doTipo('incompativel')[0];
+  if (incompativel) {
+    partes.incompativel = incompativel.detalhe
+      ? `${incompativel.texto}: ${incompativel.detalhe}`
+      : incompativel.texto;
+  }
+
+  const frase = ORDEM_PROBLEMAS.map(t => partes[t]).filter(Boolean).join('; ');
+  const total = pendencias.length;
+  return `${total} pendência${total === 1 ? '' : 's'}: ${frase}.`;
+}
+
+const RESUMO_FORA_DO_PERIODO = `Emitida antes de ${DATA_DE_CORTE_EXIBIDA}: fora do período de exigência, sem conferência.`;
+const RESUMO_SEM_DATA = 'XML sem data de emissão válida: a nota não é conferida.';
 
 export function conferirReforma(doc: NFeDocument, tabela: TabelaReforma): ConferenciaReforma {
   const dia = diaDaNota(doc);
@@ -182,27 +291,79 @@ export function conferirReforma(doc: NFeDocument, tabela: TabelaReforma): Confer
       pendencias: [],
       avisos: [AVISO_SEM_DATA],
       informativos: [],
+      tipos: [],
+      resumo: RESUMO_SEM_DATA,
+      zerosAceitos: [],
     };
   }
 
   if (dia < DATA_DE_CORTE) {
-    return { situacao: 'fora do período', pendencias: [], avisos: [], informativos: [] };
+    return {
+      situacao: 'fora do período',
+      pendencias: [],
+      avisos: [],
+      informativos: [],
+      tipos: [],
+      resumo: RESUMO_FORA_DO_PERIODO,
+      zerosAceitos: [],
+    };
   }
 
   const campos = doc.camposTributarios ?? [];
   const pendencias: PendenciaReforma[] = [];
   const avisos: string[] = [];
   const informativos: string[] = [];
+  const zerosAceitos: string[] = [];
 
-  for (const { campo, nome } of CAMPOS_EXIGIDOS) {
-    const pendencia = pendenciaDeAusencia(campoDe(campos, campo), nome);
-    if (pendencia) pendencias.push(pendencia);
+  const pares = doc.reformaItens ?? [];
+
+  // Zero aceito: CST do item na tabela sem exigir o grupo padrão
+  // (imunidade, não incidência...), ou IBS municipal antes de 2027. CST
+  // ausente ou fora da tabela não livra o zero.
+  const zeroAceito = (campo: string, cst: string | undefined) =>
+    (campo === 'IBS municipal' && dia < INICIO_IBS_MUNICIPAL) ||
+    (presente(cst) && tabela.exigeGrupoPadrao?.(cst.trim()) === false);
+
+  for (const { campo, nome, deValor, feminino } of CAMPOS_EXIGIDOS) {
+    const conferido = campoDe(campos, campo);
+    const ausencia = pendenciaDeAusencia(conferido, nome);
+
+    // Informado com zero, item a item. Conta sobre todos os itens da nota.
+    let zerados = 0;
+    if (deValor && conferido && conferido.situacao !== 'ausente') {
+      const comZero = pares.filter(p => p.zerados?.includes(campo));
+      zerados = comZero.filter(p => !zeroAceito(campo, p.cst)).length;
+      if (comZero.length > 0 && zerados === 0) zerosAceitos.push(campo);
+    }
+
+    if (zerados === 0) {
+      if (ausencia) pendencias.push(ausencia);
+      continue;
+    }
+
+    const contagem = pares.length > 1 && zerados < pares.length ? `${zerados} de ${pares.length} itens` : undefined;
+    if (ausencia?.problema === 'parcial') {
+      // Uma pendência só para o campo, com as duas contagens.
+      const itens = conferido!.itens!;
+      pendencias.push({
+        ...ausencia,
+        texto: `${nome} (${itens.com} de ${itens.total} itens; ${feminino ? 'informada' : 'informado'} com valor zero em ${zerados})`,
+        tambem: ['zerado'],
+      });
+      continue;
+    }
+    const texto = textoZerado(nome, feminino);
+    pendencias.push({
+      campo: nome,
+      problema: 'zerado',
+      texto: contagem ? `${texto} (${contagem})` : texto,
+      ...(contagem ? { contagem } : {}),
+    });
   }
 
   // Regra de vínculo, item a item: os três primeiros dígitos do cClassTrib
   // são o próprio CST. Só se compara quando os dois estão no item; a falta
   // de um deles já virou pendência acima.
-  const pares = doc.reformaItens ?? [];
   const incompativeis = pares.filter(
     p => presente(p.cst) && presente(p.cClassTrib) && p.cClassTrib.trim().slice(0, 3) !== p.cst.trim()
   );
@@ -248,11 +409,15 @@ export function conferirReforma(doc: NFeDocument, tabela: TabelaReforma): Confer
     informativos.push(INFORMATIVO_SELETIVO);
   }
 
+  const avisosUnicos = Array.from(new Set(avisos));
   return {
     situacao: pendencias.length > 0 ? 'com pendência' : 'completa',
     pendencias,
-    avisos: Array.from(new Set(avisos)),
+    avisos: avisosUnicos,
     informativos,
+    tipos: ORDEM_PROBLEMAS.filter(t => pendencias.some(p => tiposDa(p).includes(t))),
+    resumo: resumirPendencias(pendencias, avisosUnicos),
+    zerosAceitos,
   };
 }
 
@@ -302,7 +467,11 @@ export function resumoPorSentido(
 }
 
 export interface LinhaConsolidado {
+  /** Rótulo da linha: "CBS: zerado", ou o próprio problema na incompatibilidade */
   problema: string;
+  /** Campo, como o contador o conhece */
+  campo: string;
+  tipo: TipoProblema;
   entradas: number;
   saidas: number;
   semVinculo: number;
@@ -310,17 +479,33 @@ export interface LinhaConsolidado {
   total: number;
 }
 
+/** Tipos de problema possíveis em cada campo, na ordem de ORDEM_PROBLEMAS. */
+function tiposDoCampo(campo: { deValor?: true }): TipoProblema[] {
+  return campo.deValor ? ['ausente', 'parcial', 'zerado'] : ['ausente', 'parcial'];
+}
+
 /**
- * Quantas notas têm cada problema. Campo presente só em parte dos itens
- * conta como ausente daquele campo.
+ * Quantas notas têm cada problema, uma linha por campo e tipo: ausente,
+ * parcial (NF-e e NFC-e) e zerado contam separados. Uma pendência que junta
+ * parcial e zerado conta nas duas linhas.
  */
 export function consolidadoPorCampo(
   docs: Array<{ tipo: DocumentType; conferencia: ConferenciaReforma }>
 ): LinhaConsolidado[] {
-  return PROBLEMAS_POSSIVEIS.map(problema => {
-    const com = docs.filter(d => d.conferencia.pendencias.some(p => p.campo === problema));
+  const linhas: Array<{ problema: string; campo: string; tipo: TipoProblema }> = [
+    ...CAMPOS_EXIGIDOS.flatMap(c =>
+      tiposDoCampo(c).map(tipo => ({ problema: `${c.nome}: ${ROTULO_PROBLEMA[tipo]}`, campo: c.nome, tipo }))
+    ),
+    { problema: TEXTO_INCOMPATIVEL, campo: TEXTO_INCOMPATIVEL, tipo: 'incompativel' },
+  ];
+  return linhas.map(({ problema, campo, tipo }) => {
+    const com = docs.filter(d =>
+      d.conferencia.pendencias.some(p => p.campo === campo && tiposDa(p).includes(tipo))
+    );
     return {
       problema,
+      campo,
+      tipo,
       entradas: com.filter(d => d.tipo === 'entrada').length,
       saidas: com.filter(d => d.tipo === 'saida').length,
       semVinculo: com.filter(d => d.tipo === 'indefinido').length,

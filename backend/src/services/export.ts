@@ -6,6 +6,7 @@ import { FiltrosAnalise } from '../utils/filtros';
 import {
   ConferenciaReforma,
   DATA_DE_CORTE_EXIBIDA,
+  ROTULO_PROBLEMA,
   TabelaReforma,
   conferirReforma,
   consolidadoPorCampo,
@@ -115,7 +116,7 @@ export class ExcelExportService {
       .sort((a, b) => (ORDEM_SENTIDO[a.doc.tipo] ?? 9) - (ORDEM_SENTIDO[b.doc.tipo] ?? 9));
 
     const data: (string | number)[][] = [
-      ['PENDÊNCIAS DA REFORMA POR NOTA'],
+      ['PENDÊNCIAS DE TRIBUTOS POR NOTA'],
       [],
       ...cabecalho,
       [],
@@ -127,7 +128,11 @@ export class ExcelExportService {
         'Emitente',
         'CNPJ do emitente',
         'Destinatário / tomador',
+        'Leiaute',
+        'Código do serviço',
         'Situação',
+        'Tipo de problema',
+        'Resumo',
         'Pendências',
         'Avisos',
       ],
@@ -142,9 +147,19 @@ export class ExcelExportService {
         doc.nomeEmitente,
         doc.cnpjEmitente,
         doc.nomeDestino,
+        doc.leiaute ?? '',
+        doc.codigoServico
+          ? `${doc.codigoServico}${doc.tipoCodigoServico ? ` (${doc.tipoCodigoServico})` : ''}`
+          : '',
         conferencia.situacao,
+        conferencia.tipos.map(t => ROTULO_PROBLEMA[t]).join(', '),
+        conferencia.resumo,
         conferencia.pendencias
-          .map(p => (p.detalhe ? `${p.texto}: ${p.detalhe}` : p.texto))
+          .map(p => {
+            const texto = p.detalhe ? `${p.texto}: ${p.detalhe}` : p.texto;
+            const tipos = [p.problema, ...(p.tambem ?? [])].map(t => ROTULO_PROBLEMA[t]);
+            return `${texto} [${tipos.join(', ')}]`;
+          })
           .join('; '),
         conferencia.avisos.join('; '),
       ]);
@@ -157,9 +172,10 @@ export class ExcelExportService {
     const worksheet = XLSX.utils.aoa_to_sheet(data);
     worksheet['!cols'] = [
       { wch: 22 }, { wch: 12 }, { wch: 46 }, { wch: 14 }, { wch: 30 },
-      { wch: 18 }, { wch: 30 }, { wch: 14 }, { wch: 70 }, { wch: 60 },
+      { wch: 18 }, { wch: 30 }, { wch: 26 }, { wch: 14 }, { wch: 14 }, { wch: 30 },
+      { wch: 80 }, { wch: 70 }, { wch: 60 },
     ];
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Pendências da reforma');
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Pendências de tributos');
   }
 
   /** Quantas notas têm cada problema, separado em entradas e saídas. */

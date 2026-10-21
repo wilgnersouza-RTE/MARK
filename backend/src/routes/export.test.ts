@@ -7,7 +7,7 @@ import { config } from '../config';
 import { sessionService } from '../services/session';
 import { NFeDocument } from '../types';
 import exportRoutes from './export';
-import { conferirCamposNFe } from '../services/camposTributarios';
+import { conferirCamposNFe, parDoItem } from '../services/camposTributarios';
 
 const USUARIO = 'teste-export';
 const EMPRESA = '11111111000111';
@@ -101,6 +101,19 @@ async function linhasDaAbaDocumentos(query: string): Promise<any[][]> {
   return linhas(await baixarPlanilha(query), 'Documentos').slice(1);
 }
 
+/**
+ * Linhas de nota da aba Pendências de tributos, como objetos pelo nome da
+ * coluna: os testes não dependem da posição das colunas.
+ */
+function notasPorColuna(livro: XLSX.WorkBook): Array<Record<string, any>> {
+  const aba = linhas(livro, 'Pendências de tributos');
+  const inicio = aba.findIndex(l => l[0] === 'Sentido');
+  const cabecalho = aba[inicio] as string[];
+  return aba
+    .slice(inicio + 1)
+    .map(l => Object.fromEntries(cabecalho.map((coluna, i) => [coluna, l[i]])));
+}
+
 /** Valor da linha do Resumo cujo rótulo é o informado. */
 function valorDoResumo(livro: XLSX.WorkBook, rotulo: string): unknown {
   return linhas(livro, 'Resumo').find(l => l[0] === rotulo)?.[1];
@@ -136,10 +149,10 @@ describe('GET /export/excel: abas da reforma', () => {
   it('traz as abas novas com cabeçalho de empresa, filtros e tabela', async () => {
     const livro = await baixarPlanilha('?sentido=entrada&cfop=1102');
     expect(livro.SheetNames).toEqual(
-      expect.arrayContaining(['Pendências da reforma', 'Consolidado por campo'])
+      expect.arrayContaining(['Pendências de tributos', 'Consolidado por campo'])
     );
 
-    const pendencias = linhas(livro, 'Pendências da reforma');
+    const pendencias = linhas(livro, 'Pendências de tributos');
     const rotulo = (r: string) => pendencias.find(l => l[0] === r)?.[1];
     expect(rotulo('Empresa analisada')).toBe('EMPRESA (11.111.111/0001-11)');
     expect(rotulo('Entrada/Saída')).toBe('Entradas');
@@ -149,16 +162,14 @@ describe('GET /export/excel: abas da reforma', () => {
   });
 
   it('lista por nota as pendências do recorte, só entradas', async () => {
-    const livro = await baixarPlanilha('?sentido=entrada');
-    const pendencias = linhas(livro, 'Pendências da reforma');
-    const inicio = pendencias.findIndex(l => l[0] === 'Sentido');
-    const notas = pendencias.slice(inicio + 1);
+    const notas = notasPorColuna(await baixarPlanilha('?sentido=entrada'));
 
     expect(notas).toHaveLength(2);
-    expect(notas.every(l => l[0] === 'Entrada')).toBe(true);
+    expect(notas.every(l => l['Sentido'] === 'Entrada')).toBe(true);
     // As notas de teste não trazem nenhum campo da reforma
-    expect(notas[0][8]).toContain('CBS');
-    expect(notas[0][7]).toBe('com pendência');
+    expect(notas[0]['Pendências']).toContain('CBS');
+    expect(notas[0]['Situação']).toBe('com pendência');
+    expect(notas[0]['Tipo de problema']).toBe('ausente');
   });
 
   it('consolida quantas notas têm cada problema', async () => {
@@ -168,14 +179,15 @@ describe('GET /export/excel: abas da reforma', () => {
 
     expect(linha('Notas exigíveis')?.slice(1, 5)).toEqual([2, 1, 0, 3]);
     expect(linha('Notas completas')?.slice(1, 5)).toEqual([0, 0, 0, 0]);
-    expect(linha('CBS')?.slice(1, 5)).toEqual([2, 1, 0, 3]);
+    expect(linha('CBS: ausente')?.slice(1, 5)).toEqual([2, 1, 0, 3]);
+    expect(linha('CBS: zerado')?.slice(1, 5)).toEqual([0, 0, 0, 0]);
     expect(linha('cClassTrib incompatível com o CST')?.slice(1, 5)).toEqual([0, 0, 0, 0]);
   });
 
   it('com filtro de entradas, o consolidado só conta entradas', async () => {
     const livro = await baixarPlanilha('?sentido=entrada');
     const consolidado = linhas(livro, 'Consolidado por campo');
-    expect(consolidado.find(l => l[0] === 'CBS')?.slice(1, 5)).toEqual([2, 0, 0, 2]);
+    expect(consolidado.find(l => l[0] === 'CBS: ausente')?.slice(1, 5)).toEqual([2, 0, 0, 2]);
   });
 });
 
@@ -193,7 +205,8 @@ describe('GET /export/excel: períodos, avisos e ordem', () => {
       {
         ...nota('saida-completa-aviso', EMPRESA, OUTRO, ['5102']),
         camposTributarios: conferirCamposNFe([ITEM]),
-        reformaItens: [{ cst: '000', cClassTrib: '000099' }],
+        // Como o parser monta: com os campos que vieram zerados
+        reformaItens: [parDoItem(ITEM)],
         diaEmissao: '2026-02-01',
       },
       nota('saida-pendente', EMPRESA, OUTRO, ['5102']),
@@ -222,26 +235,28 @@ describe('GET /export/excel: períodos, avisos e ordem', () => {
     );
   });
 
-  async function notasDasPendencias(): Promise<any[][]> {
-    const pendencias = linhas(await baixarPlanilha('', cabecalhos2), 'Pendências da reforma');
-    return pendencias.slice(pendencias.findIndex(l => l[0] === 'Sentido') + 1);
+  async function notasDasPendencias(): Promise<Array<Record<string, any>>> {
+    return notasPorColuna(await baixarPlanilha('', cabecalhos2));
   }
 
   it('deixa de fora as notas sem data e de 2025', async () => {
-    const chaves = (await notasDasPendencias()).map(l => l[2]);
+    const chaves = (await notasDasPendencias()).map(l => l['Número / chave']);
     expect(chaves).not.toContain('chave-entrada-sem-data');
     expect(chaves).not.toContain('chave-entrada-2025');
   });
 
   it('inclui a nota completa que tem aviso', async () => {
-    const linha = (await notasDasPendencias()).find(l => l[2] === 'chave-saida-completa-aviso');
-    expect(linha?.[7]).toBe('completa');
-    expect(linha?.[9]).toContain('não consta na tabela carregada');
-    expect(linha?.[3]).toBe('01/02/2026');
+    const linha = (await notasDasPendencias()).find(
+      l => l['Número / chave'] === 'chave-saida-completa-aviso'
+    );
+    // IBS municipal zero em 2026 é aceito: a nota segue completa
+    expect(linha?.['Situação']).toBe('completa');
+    expect(linha?.['Avisos']).toContain('não consta na tabela carregada');
+    expect(linha?.['Data de emissão']).toBe('01/02/2026');
   });
 
   it('sem filtro de sentido, entradas vêm antes das saídas', async () => {
-    expect((await notasDasPendencias()).map(l => l[0])).toEqual(['Entrada', 'Saída', 'Saída']);
+    expect((await notasDasPendencias()).map(l => l['Sentido'])).toEqual(['Entrada', 'Saída', 'Saída']);
   });
 
   it('o consolidado conta fora do período e sem data, com o percentual total', async () => {
@@ -251,5 +266,61 @@ describe('GET /export/excel: períodos, avisos e ordem', () => {
     expect(linha('Fora do período')?.[0]).toBe('Fora do período (antes de 01/01/2026)');
     expect(linha('Sem data de emissão')?.[4]).toBe(1);
     expect(linha('Percentual de completas')?.slice(1, 5)).toEqual(['0%', '50%', '0%', '33.3%']);
+  });
+});
+
+describe('GET /export/excel: tipo de problema', () => {
+  const SESSAO3 = `sess-${USUARIO}-3`;
+  const cabecalhos3 = { Authorization: `Bearer ${token}`, 'x-session-id': SESSAO3 };
+
+  beforeAll(async () => {
+    const zerada = {
+      cstReforma: '000', cClassTrib: '000001', baseIBSCBS: '100.00', ibsEstadual: '0.10',
+      ibsMunicipal: '0.05', cbs: '0.00', aliquotaCBS: '0', valorCBS: '0.00',
+    };
+    const documentos: NFeDocument[] = [
+      {
+        ...nota('entrada-cbs-zero', OUTRO, EMPRESA, ['1102']),
+        camposTributarios: conferirCamposNFe([zerada]),
+        reformaItens: [parDoItem(zerada)],
+      },
+    ];
+    sessionService.criarOuRecuperarSessao(SESSAO3, USUARIO, 'teste@exemplo.com');
+    await sessionService.adicionarDocumentos(
+      SESSAO3,
+      documentos,
+      {
+        sessionId: SESSAO3,
+        quantidadeArquivos: 1,
+        arquivosProcessados: 1,
+        arquivosComErro: 0,
+        erros: [],
+        documentos,
+        timestamp: new Date().toISOString(),
+      },
+      { cnpj: EMPRESA, nome: 'EMPRESA', inferida: true }
+    );
+  });
+
+  it('a aba Pendências de tributos traz o tipo de problema de cada pendência', async () => {
+    const livro = await baixarPlanilha('', cabecalhos3);
+    expect(livro.SheetNames).toContain('Pendências de tributos');
+    expect(livro.SheetNames).not.toContain('Pendências da reforma');
+
+    const aba = linhas(livro, 'Pendências de tributos');
+    const cabecalho = aba.find(l => l[0] === 'Sentido')!;
+    const linha = aba[aba.indexOf(cabecalho) + 1];
+    const coluna = (nome: string) => linha[cabecalho.indexOf(nome)];
+
+    expect(coluna('Tipo de problema')).toBe('zerado');
+    expect(coluna('Pendências')).toBe('CBS informada com valor zero [zerado]');
+    expect(coluna('Resumo')).toBe('1 pendência: CBS informada com valor zero.');
+  });
+
+  it('o consolidado separa zerado de ausente', async () => {
+    const consolidado = linhas(await baixarPlanilha('', cabecalhos3), 'Consolidado por campo');
+    const linha = (r: string) => consolidado.find(l => l[0] === r)?.slice(1, 5);
+    expect(linha('CBS: zerado')).toEqual([1, 0, 0, 1]);
+    expect(linha('CBS: ausente')).toEqual([0, 0, 0, 0]);
   });
 });

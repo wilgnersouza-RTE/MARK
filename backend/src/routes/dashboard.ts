@@ -179,8 +179,9 @@ router.get('/documentos', authenticate, async (req: Request, res: Response) => {
 /**
  * GET /api/v1/dashboard/campos
  *
- * Conferência da reforma nota a nota (ver services/conferenciaReforma.ts):
- * situação, pendências pelo nome do campo, avisos e, em `porSentido`, o
+ * Conferência de tributos nota a nota (ver services/conferenciaReforma.ts):
+ * situação, resumo em uma frase, tipos de problema, pendências pelo nome do
+ * campo, avisos, leiaute e código do serviço da NFS-e e, em `porSentido`, o
  * percentual de completas em entradas e saídas. Sem paginação: paginar
  * exigiria manter estado no servidor para um volume que cabe folgado numa
  * resposta só. Sem sessão, devolve o mesmo formato com tudo zerado.
@@ -215,10 +216,19 @@ router.get('/campos', authenticate, async (req: Request, res: Response) => {
         cnpjEmitente: doc.cnpjEmitente,
         valor: doc.values.total,
         situacao: conferencia.situacao,
+        resumo: conferencia.resumo,
+        tipos: conferencia.tipos,
+        leiaute: doc.leiaute,
+        codigoServico: doc.codigoServico,
+        tipoCodigoServico: doc.tipoCodigoServico,
         pendencias: conferencia.pendencias,
         avisos: conferencia.avisos,
         informativos: conferencia.informativos,
-        campos: doc.camposTributarios ?? [],
+        // Marca o campo cujo zero a conferência aceitou (CST sem grupo padrão
+        // ou IBS municipal em 2026), para a tela não alertar à toa.
+        campos: (doc.camposTributarios ?? []).map(c =>
+          c.grupo === 'reforma' && conferencia.zerosAceitos.includes(c.campo) ? { ...c, zeroAceito: true } : c
+        ),
       }));
 
     const contar = (situacao: string) => notas.filter(n => n.situacao === situacao).length;

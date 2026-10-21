@@ -335,3 +335,280 @@ describe('parseNFE: casos de revisão da reforma', () => {
     expect(doc.diaEmissao).toBe('2026-02-12');
   });
 });
+
+/** Leiaute Paulistana: raiz NFe, ValorISS e CodigoServico, sem campos da reforma. */
+const NFSE_PAULISTANA = `<?xml version="1.0" encoding="UTF-8"?>
+<NFe xmlns="http://www.prefeitura.sp.gov.br/nfe">
+  <ChaveNFe><InscricaoPrestador>12345678</InscricaoPrestador><NumeroNFe>10</NumeroNFe><CodigoVerificacao>ABCD1234</CodigoVerificacao></ChaveNFe>
+  <DataEmissaoNFe>2026-03-10T10:00:00</DataEmissaoNFe>
+  <CPFCNPJPrestador><CNPJ>55555555000155</CNPJ></CPFCNPJPrestador>
+  <RazaoSocialPrestador>PRESTADOR PAULISTANO FICTICIO</RazaoSocialPrestador>
+  <CPFCNPJTomador><CNPJ>11111111000111</CNPJ></CPFCNPJTomador>
+  <RazaoSocialTomador>TOMADOR FICTICIO</RazaoSocialTomador>
+  <ValorServicos>1980.00</ValorServicos>
+  <CodigoServico>02919</CodigoServico>
+  <AliquotaServicos>0.02</AliquotaServicos>
+  <ValorISS>0.00</ValorISS>
+  <BaseCalculo>0</BaseCalculo>
+</NFe>`;
+
+/** Leiaute municipal com grupos: raiz NFSe, ValoresNFSe com CBS, IBS e IS. */
+function nfseComGrupos(grupos: string, valores = '<BaseCalculo>1000.00</BaseCalculo><Aliquota>2.5</Aliquota><ValorIss>25.00</ValorIss>'): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<NFSe>
+  <Numero>5</Numero>
+  <DataEmissaoNfse>2026-03-05T09:00:00</DataEmissaoNfse>
+  <CpfCnpjPrestador>55555555000155</CpfCnpjPrestador>
+  <RazaoSocialPrestador>PRESTADOR MUNICIPAL FICTICIO</RazaoSocialPrestador>
+  <CpfCnpjTomador>11111111000111</CpfCnpjTomador>
+  <RazaoSocialTomador>TOMADOR FICTICIO</RazaoSocialTomador>
+  <Servicos><CodigoTributacaoMunicipio>010701</CodigoTributacaoMunicipio></Servicos>
+  <ValoresNFSe>
+    <ValorServicos>1000.00</ValorServicos>
+    ${valores}
+    ${grupos}
+  </ValoresNFSe>
+</NFSe>`;
+}
+
+const GRUPOS_ZERADOS =
+  '<CBS><Aliquota>0</Aliquota><Vlr>0</Vlr></CBS>' +
+  '<IBS><BaseCalculo>0</BaseCalculo><AliquotaEstadual>0</AliquotaEstadual><AliquotaMunicipal>0</AliquotaMunicipal><Vlr>0</Vlr></IBS>' +
+  '<IS><Aliquota>0</Aliquota><Vlr>0</Vlr></IS>';
+
+describe('parseNFE: leitura corrigida da NFS-e', () => {
+  const campo = (doc: any, nome: string) =>
+    doc.camposTributarios.find((c: any) => c.grupo === 'reforma' && c.campo === nome);
+
+  it('base do ISS declarada 0 fica 0, não vira o valor do serviço', async () => {
+    const doc = await nfeParserService.parseNFE(NFSE_PAULISTANA);
+    expect(doc.values.total).toBe(1980);
+    expect(doc.values.baseCalculo).toBe(0);
+  });
+
+  it('sem a tag de base, a base do ISS é calculada', async () => {
+    const doc = await nfeParserService.parseNFE(NFSE_PAULISTANA.replace('<BaseCalculo>0</BaseCalculo>', ''));
+    expect(doc.values.baseCalculo).toBe(1980);
+  });
+
+  it('guarda o leiaute e o código do serviço', async () => {
+    const paulistana = await nfeParserService.parseNFE(NFSE_PAULISTANA);
+    expect(paulistana.leiaute).toBe('Paulistana (São Paulo)');
+    expect(paulistana.codigoServico).toBe('02919');
+    expect(paulistana.tipoCodigoServico).toBe('código do serviço municipal');
+
+    const municipal = await nfeParserService.parseNFE(nfseComGrupos(GRUPOS_ZERADOS));
+    expect(municipal.leiaute).toBe('Municipal (raiz NFSe)');
+    expect(municipal.codigoServico).toBe('010701');
+    expect(municipal.tipoCodigoServico).toBe('código de tributação municipal');
+  });
+
+  it('Paulistana sem campos da reforma: todos ausentes', async () => {
+    const doc = await nfeParserService.parseNFE(NFSE_PAULISTANA);
+    const r = conferirReforma(doc, tabelaCarregada());
+    expect(r.pendencias.every(p => p.problema === 'ausente')).toBe(true);
+    expect(r.pendencias).toHaveLength(6);
+  });
+
+  it('lê a base do IBS/CBS em IBS/BaseCalculo', async () => {
+    const doc = await nfeParserService.parseNFE(
+      nfseComGrupos('<IBS><BaseCalculo>1000</BaseCalculo><Vlr>1.00</Vlr></IBS>')
+    );
+    const base = campo(doc, 'Base de cálculo IBS/CBS');
+    expect(base.situacao).toBe('preenchido');
+    expect(base.base).toBe(1000);
+  });
+
+  it('IBS/BaseCalculo não vira a base do ISS', async () => {
+    const doc = await nfeParserService.parseNFE(
+      nfseComGrupos(
+        '<CBS><Aliquota>0.9</Aliquota><Vlr>9.00</Vlr></CBS><IBS><BaseCalculo>1000</BaseCalculo><Vlr>1.00</Vlr></IBS>',
+        '<ValorIss>0</ValorIss>'
+      ).replace('<ValorServicos>1000.00</ValorServicos>', '<ValorServicos>1980.00</ValorServicos>')
+    );
+    expect(doc.values.baseCalculo).toBe(1980);
+    // A alíquota da CBS não é a do ISS
+    expect(doc.values.aliquota).toBe(0);
+  });
+
+  it('IBS municipal informado como AliquotaMunicipal, cada esfera com sua alíquota', async () => {
+    const doc = await nfeParserService.parseNFE(
+      nfseComGrupos(
+        '<IBS><BaseCalculo>1000</BaseCalculo><AliquotaEstadual>0.1</AliquotaEstadual>' +
+          '<AliquotaMunicipal>0.05</AliquotaMunicipal><Vlr>1.50</Vlr></IBS>'
+      )
+    );
+    const estadual = campo(doc, 'IBS estadual');
+    const municipal = campo(doc, 'IBS municipal');
+    expect(estadual.situacao).toBe('preenchido');
+    expect(estadual.aliquota).toBe(0.1);
+    expect(municipal.situacao).toBe('preenchido');
+    expect(municipal.aliquota).toBe(0.05);
+    expect(estadual.zerado).toBeUndefined();
+    expect(municipal.zerado).toBeUndefined();
+  });
+
+  it('lote Supera: grupos zerados viram pendência de zero, sem ausente falso', async () => {
+    const doc = await nfeParserService.parseNFE(nfseComGrupos(GRUPOS_ZERADOS));
+    const r = conferirReforma(doc, tabelaCarregada());
+    expect(r.pendencias.map(p => [p.campo, p.problema])).toEqual([
+      ['CST do IBS/CBS', 'ausente'],
+      ['cClassTrib', 'ausente'],
+      ['Base de cálculo do IBS/CBS', 'zerado'],
+      ['IBS estadual (UF)', 'zerado'],
+      // IBS municipal zero em 2026 é aceito (LC 214/2025, art. 343)
+      ['CBS', 'zerado'],
+    ]);
+    // A base do ISS continua a do ValoresNFSe
+    expect(doc.values.baseCalculo).toBe(1000);
+    const cbs = campo(doc, 'CBS');
+    expect(cbs).toEqual(
+      expect.objectContaining({ situacao: 'preenchido', aliquota: 0, valorNumerico: 0, zerado: true })
+    );
+  });
+
+  it('NF-e guarda alíquota, base e valor do grupo da reforma por item', async () => {
+    const det =
+      '<det nItem="1"><prod><cProd>1</cProd><xProd>ITEM</xProd><vProd>100.00</vProd></prod><imposto>' +
+      '<IBSCBS><CST>000</CST><cClassTrib>000001</cClassTrib><gIBSCBS><vBC>100.00</vBC>' +
+      '<gIBSUF><pIBSUF>0.10</pIBSUF><vIBSUF>0.10</vIBSUF></gIBSUF>' +
+      '<gIBSMun><pIBSMun>0.00</pIBSMun><vIBSMun>0.00</vIBSMun></gIBSMun>' +
+      '<gCBS><pCBS>0.90</pCBS><vCBS>0.90</vCBS></gCBS></gIBSCBS></IBSCBS></imposto></det>';
+    const xml = fs.readFileSync(NOTA1, 'utf-8').replace(/<det [\s\S]*<\/det>/, det);
+    const doc = await nfeParserService.parseNFE(xml);
+    expect(doc.reformaItens).toEqual([{ cst: '000', cClassTrib: '000001', zerados: ['IBS municipal'] }]);
+    expect(campo(doc, 'CBS')).toEqual(
+      expect.objectContaining({ aliquota: 0.9, valorNumerico: 0.9 })
+    );
+  });
+});
+
+describe('parseNFE: revisão da conferência de tributos', () => {
+  const campo = (doc: any, grupo: string, nome: string) =>
+    doc.camposTributarios.find((c: any) => c.grupo === grupo && c.campo === nome);
+
+  it('rotula o ABRASF (CompNfse) como municipal ABRASF', async () => {
+    const doc = await nfeParserService.parseNFE(NFSE);
+    expect(doc.leiaute).toBe('Municipal ABRASF (CompNfse)');
+  });
+
+  it('NFSe > infNFSe com NumeroNfse é municipal, não padrão nacional', async () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<NFSe><infNFSe>
+  <NumeroNfse>9</NumeroNfse>
+  <DataEmissaoNfse>2026-03-05T09:00:00</DataEmissaoNfse>
+  <CpfCnpjPrestador>55555555000155</CpfCnpjPrestador>
+  <ValoresNFSe><ValorServicos>500.00</ValorServicos><BaseCalculo>500.00</BaseCalculo></ValoresNFSe>
+</infNFSe></NFSe>`;
+    const doc = await nfeParserService.parseNFE(xml);
+    expect(doc.leiaute).toBe('Municipal (raiz NFSe)');
+  });
+
+  it('com DPS e cTribNac é padrão nacional, com o código do serviço', async () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<NFSe><infNFSe>
+  <nNFSe>12</nNFSe>
+  <DPS><infDPS>
+    <dhEmi>2026-03-05T09:00:00-03:00</dhEmi>
+    <serv><cServ><cTribNac>010701</cTribNac></cServ></serv>
+    <valores><vServPrest><vServ>800.00</vServ></vServPrest></valores>
+  </infDPS></DPS>
+</infNFSe></NFSe>`;
+    const doc = await nfeParserService.parseNFE(xml);
+    expect(doc.leiaute).toBe('Padrão nacional');
+    expect(doc.codigoServico).toBe('010701');
+    expect(doc.tipoCodigoServico).toBe('código de tributação nacional (cTribNac)');
+  });
+
+  it('alíquota do ISS: AliquotaServicos 0 não esconde Aliquota 2.5', async () => {
+    const xml = NFSE_PAULISTANA.replace(
+      '<AliquotaServicos>0.02</AliquotaServicos>',
+      '<AliquotaServicos>0</AliquotaServicos><Aliquota>2.5</Aliquota>'
+    );
+    const doc = await nfeParserService.parseNFE(xml);
+    expect(doc.values.aliquota).toBe(2.5);
+    expect(campo(doc, 'atual', 'Valor do ISS').aliquota).toBe(2.5);
+  });
+
+  it('ValorISS declarado 0,00 aparece como 0, não como não informado', async () => {
+    const doc = await nfeParserService.parseNFE(NFSE_PAULISTANA);
+    expect(campo(doc, 'atual', 'Valor do ISS')).toEqual(
+      expect.objectContaining({ situacao: 'preenchido', valorNumerico: 0 })
+    );
+  });
+
+  it('grupo vazio ou sem valor e alíquota é ausente, mesmo com base zero', async () => {
+    const doc = await nfeParserService.parseNFE(
+      nfseComGrupos('<CBS/><IBS><BaseCalculo>0</BaseCalculo></IBS>')
+    );
+    expect(campo(doc, 'reforma', 'CBS').situacao).toBe('ausente');
+    expect(campo(doc, 'reforma', 'IBS estadual').situacao).toBe('ausente');
+    expect(campo(doc, 'reforma', 'Base de cálculo IBS/CBS').zerado).toBe(true);
+    expect(doc.reformaItens?.[0].zerados).toEqual(['Base de cálculo IBS/CBS']);
+  });
+
+  it('texto que não é número não vira zero; 1,234.56 é lido com milhar', async () => {
+    const doc = await nfeParserService.parseNFE(
+      nfseComGrupos('<CBS><Aliquota>abc</Aliquota><Vlr>1,234.56</Vlr></CBS><IBS><Vlr>n/d</Vlr></IBS>')
+    );
+    const cbs = campo(doc, 'reforma', 'CBS');
+    expect(cbs.valorNumerico).toBe(1234.56);
+    expect(cbs.aliquota).toBeUndefined();
+    expect(campo(doc, 'reforma', 'IBS estadual').situacao).toBe('ausente');
+    expect(doc.reformaItens?.[0].zerados).toBeUndefined();
+  });
+
+  it('CT-e com CBS de alíquota e valor zero tem pendência de zero', async () => {
+    const xml = CTE_CARGA.replace(
+      '</ICMS>',
+      '</ICMS><IBSCBS><CST>000</CST><cClassTrib>000001</cClassTrib><gIBSCBS><vBC>500.00</vBC>' +
+        '<gCBS><pCBS>0</pCBS><vCBS>0.00</vCBS></gCBS></gIBSCBS></IBSCBS>'
+    );
+    const doc = await nfeParserService.parseNFE(xml);
+    expect(doc.reformaItens?.[0].zerados).toContain('CBS');
+    const r = conferirReforma(doc, tabelaCarregada());
+    expect(r.pendencias).toContainEqual(
+      expect.objectContaining({ campo: 'CBS', problema: 'zerado' })
+    );
+  });
+
+  it('CT-e aceita a alíquota como presença do grupo', async () => {
+    const xml = CTE_CARGA.replace(
+      '</ICMS>',
+      '</ICMS><IBSCBS><gIBSCBS><gCBS><pCBS>0.9</pCBS></gCBS></gIBSCBS></IBSCBS>'
+    );
+    const doc = await nfeParserService.parseNFE(xml);
+    expect(campo(doc, 'reforma', 'CBS')).toEqual(
+      expect.objectContaining({ situacao: 'preenchido', aliquota: 0.9 })
+    );
+  });
+
+  /** NF-e de um item com o imposto informado. */
+  const nfeComImposto = (imposto: string) =>
+    fs.readFileSync(NOTA1, 'utf-8').replace(
+      /<det [\s\S]*<\/det>/,
+      `<det nItem="1"><prod><cProd>1</cProd><xProd>ITEM</xProd><vProd>100.00</vProd></prod><imposto>${imposto}</imposto></det>`
+    );
+
+  it('NF-e lê campos direto em IBSCBS quando gIBSCBS não os traz', async () => {
+    const doc = await nfeParserService.parseNFE(
+      nfeComImposto(
+        '<IBSCBS><CST>000</CST><cClassTrib>000001</cClassTrib><vBC>100.00</vBC>' +
+          '<gCBS><pCBS>0.90</pCBS><vCBS>0.90</vCBS></gCBS>' +
+          '<gIBSCBS><gIBSUF><pIBSUF>0.10</pIBSUF><vIBSUF>0.10</vIBSUF></gIBSUF></gIBSCBS></IBSCBS>'
+      )
+    );
+    expect(campo(doc, 'reforma', 'Base de cálculo IBS/CBS').base).toBe(100);
+    expect(campo(doc, 'reforma', 'CBS').valorNumerico).toBe(0.9);
+    expect(campo(doc, 'reforma', 'IBS estadual').valorNumerico).toBe(0.1);
+  });
+
+  it('pISEspec do Seletivo não é tratado como alíquota percentual', async () => {
+    const doc = await nfeParserService.parseNFE(
+      nfeComImposto('<IS><pISEspec>1.5000</pISEspec><vIS>3.00</vIS></IS>')
+    );
+    const seletivo = campo(doc, 'reforma', 'Imposto Seletivo');
+    expect(seletivo.aliquota).toBeUndefined();
+    expect(seletivo.valorNumerico).toBe(3);
+  });
+});

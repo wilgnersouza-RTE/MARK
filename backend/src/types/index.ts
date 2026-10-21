@@ -143,12 +143,27 @@ export interface NFeDocument {
    * nota não tem data válida.
    */
   diaEmissao?: string;
+  /**
+   * Leiaute do XML da NFS-e (padrão nacional, Paulistana, municipal...).
+   * Só a NFS-e tem leiautes diferentes; nos demais fica ausente.
+   */
+  leiaute?: string;
+  /** Código do serviço declarado na NFS-e (cTribNac, CodigoServico...) */
+  codigoServico?: string;
+  /** De que tag veio o código do serviço (cTribNac, item da LC 116, código municipal) */
+  tipoCodigoServico?: string;
 }
 
 /** CST do IBS/CBS e cClassTrib declarados num item (ou na nota). */
 export interface ParReforma {
   cst?: string;
   cClassTrib?: string;
+  /**
+   * Campos de valor da reforma informados com zero neste item (ou na nota),
+   * pelo nome usado em camposTributarios ("CBS", "IBS estadual"...).
+   * Ausente quando nenhum veio zerado.
+   */
+  zerados?: string[];
 }
 
 /**
@@ -164,8 +179,25 @@ export interface CampoTributario {
   situacao: 'preenchido' | 'parcial' | 'ausente';
   /** Valor lido, quando houver */
   valor?: string;
-  /** Em documentos com itens, em quantos deles o campo aparece */
-  itens?: { com: number; total: number };
+  /** Em documentos com itens, em quantos deles o campo aparece e em quantos veio zerado */
+  itens?: { com: number; total: number; zerados?: number };
+  /** Alíquota como consta na nota, sem conversão de escala */
+  aliquota?: number;
+  /** Base de cálculo do tributo, como consta na nota (soma dos itens na NF-e) */
+  base?: number;
+  /** Valor do tributo, como consta na nota (soma dos itens na NF-e) */
+  valorNumerico?: number;
+  /**
+   * true quando o campo foi informado com valor zero (em NF-e e NFC-e, em
+   * todos os itens que o trazem). Distingue zero de ausente.
+   */
+  zerado?: boolean;
+  /**
+   * true quando todo zero do campo é aceito pela conferência (CST que não
+   * exige o grupo padrão, ou IBS municipal em 2026). Preenchido só na
+   * resposta de /dashboard/campos, onde CST e data são conhecidos.
+   */
+  zeroAceito?: boolean;
 }
 
 // ==================== Validação e Tributos ====================

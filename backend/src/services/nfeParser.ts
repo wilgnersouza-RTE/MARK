@@ -4,7 +4,11 @@ import {
   conferirCamposNFe,
   conferirCamposNFSe,
   conferirCamposCTe,
+  parDoItem,
+  zeradosDosCampos,
+  numeroOuNada,
   type ItemConferido,
+  type Medida,
 } from './camposTributarios';
 import { diaLocal } from './conferenciaReforma';
 import { v4 as uuidv4 } from 'uuid';
@@ -13,6 +17,13 @@ import { taxRulesService } from './taxRules';
 /** Motivo único de recusa para XML que não é nenhum dos documentos aceitos. */
 export const ERRO_ESTRUTURA_DESCONHECIDA =
   'Estrutura de XML não reconhecida: o arquivo não é NF-e, NFC-e, CT-e, CT-e OS nem NFS-e.';
+
+/**
+ * Grupos da reforma no leiaute municipal da NFS-e, em minúsculas. Têm tags
+ * com o mesmo nome das do ISS (BaseCalculo, Aliquota), e por isso a leitura
+ * do ISS não entra neles.
+ */
+const GRUPOS_DA_REFORMA = ['ibs', 'cbs', 'is', 'ibsmunicipal', 'ibscbs', 'gibscbs'];
 
 export class NFEParserService {
   /**
@@ -185,7 +196,8 @@ export class NFEParserService {
       const camposTributarios = conferirCamposNFe(itens);
       const { cfops, ncms } = this.lerCodigosDosItens(nfe);
       // A regra de vínculo CST x cClassTrib vale item a item.
-      const reformaItens = itens.map(i => ({ cst: i.cstReforma, cClassTrib: i.cClassTrib }));
+      // Leva também os campos de valor que o item trouxe zerados.
+      const reformaItens = itens.map(parDoItem);
 
       const documento: NFeDocument = {
         id: uuidv4(),
@@ -266,7 +278,7 @@ export class NFEParserService {
    * A comparação ignora maiúsculas porque os leiautes divergem até nisso
    * (ValorIss contra ValorISS, CpfCnpjPrestador contra CPFCNPJPrestador).
    */
-  private buscar(no: any, nomes: string[], profundidade = 0): any {
+  private buscar(no: any, nomes: string[], profundidade = 0, ignorar: string[] = []): any {
     if (!no || typeof no !== 'object' || profundidade > 8) return undefined;
 
     const alvos = nomes.map(n => n.toLowerCase());
@@ -275,12 +287,58 @@ export class NFEParserService {
       if (alvos.includes(chave.toLowerCase())) return valor;
     }
 
-    for (const valor of Object.values(no)) {
-      const achado = this.buscar(valor, nomes, profundidade + 1);
+    for (const [chave, valor] of Object.entries(no)) {
+      if (ignorar.includes(chave.toLowerCase())) continue;
+      const achado = this.buscar(valor, nomes, profundidade + 1, ignorar);
       if (achado !== undefined) return achado;
     }
 
     return undefined;
+  }
+
+  /**
+   * Procura uma tag fora dos grupos da reforma.
+   *
+   * No leiaute municipal com grupos, CBS e IBS trazem as próprias tags
+   * BaseCalculo e Aliquota. Lidas por engano, viram a base e a alíquota do
+   * ISS. Para os campos do ISS e das retenções, esses grupos não existem.
+   */
+  private buscarForaDaReforma(no: any, nomes: string[]): any {
+    return this.buscar(no, nomes, 0, GRUPOS_DA_REFORMA);
+  }
+
+  /** Primeira tag presente e não vazia entre as candidatas, fora da reforma. */
+  private primeiraTagForaDaReforma(no: any, nomes: string[]): any {
+    for (const nome of nomes) {
+      const tag = this.buscarForaDaReforma(no, [nome]);
+      if (tag !== undefined && this.texto(tag) !== '') return tag;
+    }
+    return undefined;
+  }
+
+  /**
+   * Primeiro número positivo entre as tags candidatas, fora da reforma. Sem
+   * nenhum positivo, vale o zero declarado; sem nenhuma tag, undefined.
+   * Assim um AliquotaServicos 0 não esconde um Aliquota 2.5, e a base
+   * declarada 0, quando é a única, continua 0.
+   */
+  private numeroDeclaradoForaDaReforma(no: any, nomes: string[]): number | undefined {
+    let zeroDeclarado: number | undefined;
+    for (const nome of nomes) {
+      const tag = this.buscarForaDaReforma(no, [nome]);
+      if (tag === undefined || this.texto(tag) === '') continue;
+      const n = this.numero(tag);
+      if (n > 0) return n;
+      if (zeroDeclarado === undefined) zeroDeclarado = n;
+    }
+    return zeroDeclarado;
+  }
+
+  /** Número de uma tag; undefined quando a tag não existe, está vazia ou não é número. */
+  private numeroOpcional(no: any, nomes: string[]): number | undefined {
+    const tag = this.buscar(no, nomes);
+    if (tag === undefined) return undefined;
+    return numeroOuNada(this.texto(tag));
   }
 
   /** Texto de uma tag procurada em qualquer nível. */
@@ -303,7 +361,7 @@ export class NFEParserService {
    */
   private primeiroNumeroDe(no: any, nomes: string[]): number {
     for (const nome of nomes) {
-      const valor = this.numero(this.buscar(no, [nome]));
+      const valor = this.numero(this.buscarForaDaReforma(no, [nome]));
       if (valor > 0) return valor;
     }
     return 0;
@@ -366,14 +424,17 @@ export class NFEParserService {
     }
 
     const iss = this.primeiroNumeroDe(raiz, ['ValorIss', 'ValorISS', 'vISSQN', 'vISS']);
-    const deducoes = this.numeroDe(raiz, ['ValorDeducoes']);
-    const baseDeclarada = this.primeiroNumeroDe(raiz, ['BaseCalculo', 'vBC']);
-    const baseCalculo = baseDeclarada > 0 ? baseDeclarada : Math.max(total - deducoes, 0);
+    const deducoes = this.numero(this.buscarForaDaReforma(raiz, ['ValorDeducoes']));
+    // Base declarada vale como está, inclusive zero (nota com ISS não
+    // devido). Só se calcula a base quando a tag não existe.
+    const baseDeclarada = this.numeroDeclaradoForaDaReforma(raiz, ['BaseCalculo', 'vBC']);
+    const baseCalculo = baseDeclarada ?? Math.max(total - deducoes, 0);
 
     // Alíquota efetiva, imune à diferença de escala entre municípios.
-    const aliquotaDeclarada = this.primeiroNumeroDe(raiz, [
+    const aliquotaNaNota = this.numeroDeclaradoForaDaReforma(raiz, [
       'AliquotaServicos', 'Aliquota', 'pAliq',
     ]);
+    const aliquotaDeclarada = aliquotaNaNota ?? 0;
     const aliquota =
       baseCalculo > 0 && iss > 0
         ? (iss / baseCalculo) * 100
@@ -469,10 +530,15 @@ export class NFEParserService {
       } as any);
     }
 
+    const reforma = this.reformaDaNFSe(raiz);
+
     const camposTributarios = conferirCamposNFSe({
       baseCalculo,
       aliquota,
+      aliquotaDeclarada: aliquotaNaNota,
       iss,
+      issDeclarado:
+        this.primeiraTagForaDaReforma(raiz, ['ValorIss', 'ValorISS', 'vISSQN', 'vISS']) !== undefined,
       issRetido: issEhRetido,
       pis,
       cofins,
@@ -481,22 +547,14 @@ export class NFEParserService {
       inss,
       cst: cstReforma || undefined,
       cClassTrib: cClassTribReforma || undefined,
-      baseIBSCBS: this.buscar(raiz, ['BaseCalculoIBSCBS']) !== undefined
-        ? this.numeroDe(raiz, ['BaseCalculoIBSCBS'])
-        : undefined,
-      ibsEstadual: this.buscar(raiz, ['IBS']) !== undefined
-        ? this.numeroDe(this.buscar(raiz, ['IBS']) ?? {}, ['Vlr'])
-        : undefined,
-      ibsMunicipal: this.buscar(raiz, ['IBSMunicipal']) !== undefined
-        ? this.numeroDe(this.buscar(raiz, ['IBSMunicipal']) ?? {}, ['Vlr'])
-        : undefined,
-      cbs: this.buscar(raiz, ['CBS']) !== undefined
-        ? this.numeroDe(this.buscar(raiz, ['CBS']) ?? {}, ['Vlr'])
-        : undefined,
-      impostoSeletivo: this.buscar(raiz, ['IS']) !== undefined
-        ? this.numeroDe(this.buscar(raiz, ['IS']) ?? {}, ['Vlr'])
-        : undefined,
+      ...reforma,
     });
+    const zerados = zeradosDosCampos(camposTributarios);
+    const parReforma = {
+      cst: cstReforma || undefined,
+      cClassTrib: cClassTribReforma || undefined,
+      ...(zerados ? { zerados } : {}),
+    };
 
     return {
       id: uuidv4(),
@@ -520,10 +578,131 @@ export class NFEParserService {
       // NFS-e não tem CFOP nem NCM.
       cfops: [],
       ncms: [],
-      reformaItens: [{ cst: cstReforma || undefined, cClassTrib: cClassTribReforma || undefined }],
+      reformaItens: [parReforma],
       semDataEmissao,
       diaEmissao,
+      leiaute: this.leiauteDaNFSe(raiz),
+      ...this.codigoServicoDaNFSe(raiz),
     };
+  }
+
+  /**
+   * Campos de valor da reforma na NFS-e: base, IBS estadual, IBS municipal,
+   * CBS e Seletivo, com alíquota e valor como estão no XML.
+   *
+   * O leiaute municipal com grupos não traz BaseCalculoIBSCBS nem
+   * IBSMunicipal: a base fica em IBS/BaseCalculo (ou CBS/BaseCalculo) e o
+   * IBS municipal é a AliquotaMunicipal do próprio grupo IBS, ao lado da
+   * AliquotaEstadual, com um Vlr só para o IBS. Esse Vlr só é atribuído a
+   * uma das esferas quando a outra não aparece; zero vale para as duas,
+   * porque soma zero com parcelas não negativas é zero nas duas.
+   */
+  private reformaDaNFSe(raiz: any): {
+    baseIBSCBS?: number;
+    ibsEstadual?: Medida;
+    ibsMunicipal?: Medida;
+    cbs?: Medida;
+    impostoSeletivo?: Medida;
+  } {
+    // Grupo vazio (<CBS/>, <IBS></IBS>) conta como ausente: xml2js o
+    // entrega como texto vazio, não como objeto.
+    const grupo = (nome: string) => {
+      const achado = this.no(this.buscar(raiz, [nome]));
+      return achado && typeof achado === 'object' && Object.keys(achado).length > 0
+        ? achado
+        : undefined;
+    };
+    const ibs = grupo('IBS');
+    const ibsMun = grupo('IBSMunicipal');
+    const cbs = grupo('CBS');
+    const is = grupo('IS');
+
+    const baseIBSCBS =
+      this.numeroOpcional(raiz, ['BaseCalculoIBSCBS']) ??
+      this.numeroOpcional(ibs, ['BaseCalculo']) ??
+      this.numeroOpcional(cbs, ['BaseCalculo']);
+
+    const vlrIBS = this.numeroOpcional(ibs, ['Vlr']);
+    const aliquotaMunNoIBS = this.numeroOpcional(ibs, ['AliquotaMunicipal']);
+    const vlrMunNoIBS = this.numeroOpcional(ibs, ['VlrMunicipal', 'ValorMunicipal']);
+    const temMunicipalNoIBS = aliquotaMunNoIBS !== undefined || vlrMunNoIBS !== undefined;
+    const temMunicipal = ibsMun !== undefined || temMunicipalNoIBS;
+
+    const ibsEstadual: Medida | undefined =
+      ibs === undefined
+        ? undefined
+        : {
+            aliquota: this.numeroOpcional(ibs, ['AliquotaEstadual', 'Aliquota']),
+            valor:
+              this.numeroOpcional(ibs, ['VlrEstadual', 'ValorEstadual']) ??
+              (!temMunicipal ? vlrIBS : vlrIBS === 0 ? 0 : undefined),
+          };
+
+    const ibsMunicipal: Medida | undefined =
+      ibsMun !== undefined
+        ? {
+            aliquota: this.numeroOpcional(ibsMun, ['Aliquota', 'AliquotaMunicipal']),
+            valor: this.numeroOpcional(ibsMun, ['Vlr']),
+          }
+        : temMunicipalNoIBS
+          ? {
+              aliquota: aliquotaMunNoIBS,
+              valor: vlrMunNoIBS ?? (vlrIBS === 0 ? 0 : undefined),
+            }
+          : undefined;
+
+    const medida = (g: any): Medida | undefined =>
+      g === undefined
+        ? undefined
+        : { aliquota: this.numeroOpcional(g, ['Aliquota']), valor: this.numeroOpcional(g, ['Vlr']) };
+
+    return {
+      baseIBSCBS,
+      ibsEstadual,
+      ibsMunicipal,
+      cbs: medida(cbs),
+      impostoSeletivo: medida(is),
+    };
+  }
+
+  /**
+   * Leiaute do XML da NFS-e, para o contador saber de onde veio cada campo.
+   *
+   * O padrão nacional se reconhece pelas marcas próprias (DPS, nNFSe,
+   * cTribNac), e não pela raiz: leiautes municipais também usam NFSe e
+   * infNFSe. As marcas são procuradas em qualquer nível, para que envelopes
+   * de resposta não mudem o rótulo. A busca ignora maiúsculas, então Nfse
+   * (ABRASF) e NFSe (municipal) só se separam pelo CompNfse.
+   */
+  private leiauteDaNFSe(raiz: any): string {
+    const tem = (nomes: string[]) => this.buscar(raiz, nomes) !== undefined;
+    if (tem(['DPS', 'nNFSe', 'cTribNac'])) return 'Padrão nacional';
+    if (tem(['CompNfse']) || raiz.Nfse) return 'Municipal ABRASF (CompNfse)';
+    if (raiz.NFe || tem(['ChaveNFe'])) return 'Paulistana (São Paulo)';
+    if (tem(['NumeroNfse', 'ValoresNFSe', 'infNFSe'])) return 'Municipal (raiz NFSe)';
+    return 'Municipal';
+  }
+
+  /**
+   * Código do serviço e o tipo de código, porque cada leiaute grava um:
+   * cTribNac no nacional, item da LC 116 no ABRASF, código municipal nos
+   * demais.
+   */
+  private codigoServicoDaNFSe(raiz: any): { codigoServico?: string; tipoCodigoServico?: string } {
+    const candidatos: Array<[string, string]> = [
+      ['cTribNac', 'código de tributação nacional (cTribNac)'],
+      ['CodigoServico', 'código do serviço municipal'],
+      ['CodigoTributacaoMunicipio', 'código de tributação municipal'],
+      ['ItemListaServico', 'item da LC 116'],
+      ['cTribMun', 'código de tributação municipal'],
+    ];
+    for (const [tag, tipo] of candidatos) {
+      const achado = this.primeiraTagForaDaReforma(raiz, [tag]);
+      if (achado !== undefined) {
+        return { codigoServico: this.texto(achado), tipoCodigoServico: tipo };
+      }
+    }
+    return {};
   }
 
   /**
@@ -599,25 +778,47 @@ export class NFEParserService {
 
       // Grupo da reforma
       const reforma = this.no(imposto.IBSCBS || imposto.gIBSCBS) || {};
-      const ibsUF = this.no(reforma.gIBSUF || reforma.IBSUF) || {};
-      const ibsMun = this.no(reforma.gIBSMun || reforma.IBSMun) || {};
-      const cbsGrupo = this.no(reforma.gCBS || reforma.CBS) || {};
+      // No leiaute da NT 2025.002 a base e os subgrupos ficam um nível
+      // abaixo, em IBSCBS > gIBSCBS; há emissores que os gravam direto.
+      // Cada campo é lido primeiro em gIBSCBS e, na falta, direto em IBSCBS.
+      const gReforma = this.no(reforma.gIBSCBS) || {};
+      const subgrupo = (...nomes: string[]) =>
+        this.no(nomes.map(n => gReforma[n]).find(Boolean) ?? nomes.map(n => reforma[n]).find(Boolean)) || {};
+      const ibsUF = subgrupo('gIBSUF', 'IBSUF');
+      const ibsMun = subgrupo('gIBSMun', 'IBSMun');
+      const cbsGrupo = subgrupo('gCBS', 'CBS');
       const seletivo = this.no(imposto.IS || imposto.gIS) || {};
 
+      const t = (v: any) => this.texto(v) || undefined;
       return {
         cstICMS: this.texto(icms.CST) || this.texto(icms.CSOSN) || undefined,
-        baseICMS: this.texto(icms.vBC) || undefined,
-        aliquotaICMS: this.texto(icms.pICMS) || undefined,
-        valorICMS: this.texto(icms.vICMS) || undefined,
-        valorIPI: this.texto(ipi.vIPI) || undefined,
-        cstPIS: this.texto(pis.CST) || undefined,
-        valorPIS: this.texto(pis.vPIS) || undefined,
-        cstCOFINS: this.texto(cofins.CST) || undefined,
-        valorCOFINS: this.texto(cofins.vCOFINS) || undefined,
+        baseICMS: t(icms.vBC),
+        aliquotaICMS: t(icms.pICMS),
+        valorICMS: t(icms.vICMS),
+        baseIPI: t(ipi.vBC),
+        aliquotaIPI: t(ipi.pIPI),
+        valorIPI: t(ipi.vIPI),
+        cstPIS: t(pis.CST),
+        basePIS: t(pis.vBC),
+        aliquotaPIS: t(pis.pPIS),
+        valorPIS: t(pis.vPIS),
+        cstCOFINS: t(cofins.CST),
+        baseCOFINS: t(cofins.vBC),
+        aliquotaCOFINS: t(cofins.pCOFINS),
+        valorCOFINS: t(cofins.vCOFINS),
+        aliquotaIBSUF: t(ibsUF.pIBSUF),
+        valorIBSUF: t(ibsUF.vIBSUF),
+        aliquotaIBSMun: t(ibsMun.pIBSMun),
+        valorIBSMun: t(ibsMun.vIBSMun),
+        aliquotaCBS: t(cbsGrupo.pCBS),
+        valorCBS: t(cbsGrupo.vCBS),
+        // pISEspec é alíquota por unidade, não percentual: não entra aqui.
+        aliquotaIS: t(seletivo.pIS),
+        valorIS: t(seletivo.vIS),
 
         cstReforma: this.texto(reforma.CST) || undefined,
         cClassTrib: this.texto(reforma.cClassTrib) || undefined,
-        baseIBSCBS: this.texto(reforma.vBC) || undefined,
+        baseIBSCBS: t(gReforma.vBC) || t(reforma.vBC),
         ibsEstadual: this.texto(ibsUF.vIBSUF) || this.texto(ibsUF.pIBSUF) || undefined,
         ibsMunicipal: this.texto(ibsMun.vIBSMun) || this.texto(ibsMun.pIBSMun) || undefined,
         cbs: this.texto(cbsGrupo.vCBS) || this.texto(cbsGrupo.pCBS) || undefined,
@@ -750,7 +951,12 @@ export class NFEParserService {
       ibsMunicipal: this.texto(ibsMun.vIBSMun) || undefined,
       cbs: this.texto(cbsGrupo.vCBS) || undefined,
       impostoSeletivo: this.texto(seletivo.vIS) || undefined,
+      aliquotaIBSUF: this.texto(ibsUF.pIBSUF) || undefined,
+      aliquotaIBSMun: this.texto(ibsMun.pIBSMun) || undefined,
+      aliquotaCBS: this.texto(cbsGrupo.pCBS) || undefined,
+      aliquotaIS: this.texto(seletivo.pIS) || undefined,
     });
+    const zeradosCTe = zeradosDosCampos(camposTributarios);
 
     return {
       id: uuidv4(),
@@ -770,7 +976,13 @@ export class NFEParserService {
       // O CT-e declara um CFOP só, o da operação, e não tem NCM.
       cfops: this.unicos([this.texto(ide.CFOP)]),
       ncms: [],
-      reformaItens: [{ cst: cstReforma, cClassTrib: cClassTribReforma }],
+      reformaItens: [
+        {
+          cst: cstReforma,
+          cClassTrib: cClassTribReforma,
+          ...(zeradosCTe ? { zerados: zeradosCTe } : {}),
+        },
+      ],
       semDataEmissao,
       diaEmissao,
     };

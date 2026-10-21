@@ -28,6 +28,11 @@ Campos que contam para "completa" em CAP-4 e para o percentual de CAP-5. Os sete
 - **Existência na tabela:** código que não consta em `backend/data/cclasstrib.json` gera aviso ("não consta na tabela carregada, versão X"), não pendência, enquanto a tabela for parcial.
 - Em NF-e e NFC-e a validação é por item.
 
+## Valor zero
+
+- Base de cálculo do IBS/CBS, IBS estadual, IBS municipal e CBS informados com zero são pendência "informado com valor zero" (decisão do usuário em 2026-10-21), exceto quando o CST do IBS/CBS não exige o grupo padrão (`exigeGrupoPadrao: false` na tabela, como imunidade e não incidência).
+- IBS municipal zero não é pendência em notas de 2026: o art. 343 da LC 214/2025 só prevê alíquota estadual (0,1%) nesse ano; a municipal começa em 2027 (art. 344).
+
 ## Regra de completude
 
 - Nota completa: os sete campos presentes (em NF-e e NFC-e, presentes em todos os itens) e nenhum cClassTrib incompatível com o CST.

@@ -1,5 +1,12 @@
 import { NFeDocument, DocumentType } from '../types';
-import { conferirCamposNFe, conferirCamposNFSe, type ItemConferido } from './camposTributarios';
+import {
+  conferirCamposNFe,
+  conferirCamposNFSe,
+  parDoItem,
+  zeradosDosCampos,
+  type ItemConferido,
+  type Medida,
+} from './camposTributarios';
 import {
   AVISO_SEM_DATA,
   INFORMATIVO_SELETIVO,
@@ -14,6 +21,7 @@ import {
 const TABELA: TabelaReforma = {
   versao: '1.31',
   temCST: c => ['000', '200', '410'].includes(c),
+  exigeGrupoPadrao: c => ({ '000': true, '200': true, '410': false } as Record<string, boolean>)[c] ?? null,
   obterCClassTrib: c =>
     ({
       '000001': {},
@@ -57,27 +65,39 @@ function nfe(itens: ItemConferido[], dataEmissao = '2026-02-01T13:00:00.000Z', t
     camposTributarios: conferirCamposNFe(itens),
     cfops: [],
     ncms: [],
-    reformaItens: itens.map(i => ({ cst: i.cstReforma, cClassTrib: i.cClassTrib })),
+    reformaItens: itens.map(parDoItem),
   };
 }
 
-function nfse(sem: Array<'cbs' | 'cst'>): NFeDocument {
-  const cst = sem.includes('cst') ? undefined : '000';
+function nfse(
+  sem: Array<'cbs' | 'cst'>,
+  extra: {
+    cst?: string;
+    cClassTrib?: string;
+    baseIBSCBS?: number;
+    ibsEstadual?: Medida;
+    ibsMunicipal?: Medida;
+    cbs?: Medida;
+  } = {}
+): NFeDocument {
+  const cst = sem.includes('cst') ? undefined : extra.cst ?? '000';
+  const cClassTrib = 'cClassTrib' in extra ? extra.cClassTrib : '000001';
+  const camposTributarios = conferirCamposNFSe({
+    baseCalculo: 100, aliquota: 5, iss: 5, issRetido: false, pis: 0, cofins: 0,
+    irrf: 0, csll: 0, inss: 0,
+    cst,
+    cClassTrib,
+    baseIBSCBS: extra.baseIBSCBS ?? 100,
+    ibsEstadual: extra.ibsEstadual ?? { aliquota: 0.1, valor: 0.1 },
+    ibsMunicipal: extra.ibsMunicipal ?? { valor: 0 },
+    cbs: sem.includes('cbs') ? undefined : extra.cbs ?? { aliquota: 0.9, valor: 0.9 },
+  });
   return {
     ...nfe([]),
     modelo: 'NFSE',
     dataEmissao: '2026-02-12T10:00:00',
-    camposTributarios: conferirCamposNFSe({
-      baseCalculo: 100, aliquota: 5, iss: 5, issRetido: false, pis: 0, cofins: 0,
-      irrf: 0, csll: 0, inss: 0,
-      cst,
-      cClassTrib: '000001',
-      baseIBSCBS: 100,
-      ibsEstadual: 0.1,
-      ibsMunicipal: 0,
-      cbs: sem.includes('cbs') ? undefined : 0.9,
-    }),
-    reformaItens: [{ cst, cClassTrib: '000001' }],
+    camposTributarios,
+    reformaItens: [{ cst, cClassTrib, zerados: zeradosDosCampos(camposTributarios) }],
   };
 }
 
@@ -187,7 +207,15 @@ describe('conferirReforma: matriz da spec', () => {
 
   it('emissão antes do corte fica fora do período, sem pendências', () => {
     const r = conferirReforma(nfe([{}], '2025-12-15T13:00:00.000Z'), TABELA);
-    expect(r).toEqual({ situacao: 'fora do período', pendencias: [], avisos: [], informativos: [] });
+    expect(r).toEqual({
+      situacao: 'fora do período',
+      pendencias: [],
+      avisos: [],
+      informativos: [],
+      tipos: [],
+      resumo: 'Emitida antes de 01/01/2026: fora do período de exigência, sem conferência.',
+      zerosAceitos: [],
+    });
   });
 
   it('vale o dia local do emitente, não o dia em UTC', () => {
@@ -226,6 +254,161 @@ describe('conferirReforma: matriz da spec', () => {
   });
 });
 
+describe('conferirReforma: valor zero e tipo de problema', () => {
+  const ZERO: Medida = { aliquota: 0, valor: 0 };
+
+  it('CBS com alíquota e valor zero, sem CST, é pendência de zero', () => {
+    const r = conferirReforma(nfse(['cst'], { cbs: ZERO }), TABELA);
+    expect(r.situacao).toBe('com pendência');
+    expect(r.pendencias).toEqual([
+      { campo: 'CST do IBS/CBS', problema: 'ausente', texto: 'CST do IBS/CBS' },
+      { campo: 'CBS', problema: 'zerado', texto: 'CBS informada com valor zero' },
+    ]);
+    expect(r.tipos).toEqual(['ausente', 'zerado']);
+  });
+
+  it('CST 410, que não exige o grupo padrão, aceita CBS zero', () => {
+    const r = conferirReforma(
+      nfse([], { cst: '410', cClassTrib: '410001', cbs: ZERO }),
+      TABELA
+    );
+    expect(r.pendencias).toEqual([]);
+    expect(r.situacao).toBe('completa');
+  });
+
+  it('CST fora da tabela não livra o zero', () => {
+    const r = conferirReforma(nfse([], { cst: '999', cClassTrib: '999001', cbs: ZERO }), TABELA);
+    expect(r.pendencias.map(p => p.problema)).toEqual(['zerado']);
+  });
+
+  it('NF-e com CBS zero em 2 de 3 itens', () => {
+    const zerada = itemCompleto({ cbs: '0.00', aliquotaCBS: '0', valorCBS: '0.00' });
+    const r = conferirReforma(nfe([itemCompleto(), zerada, zerada]), TABELA);
+    expect(r.pendencias).toEqual([
+      {
+        campo: 'CBS',
+        problema: 'zerado',
+        texto: 'CBS informada com valor zero (2 de 3 itens)',
+        contagem: '2 de 3 itens',
+      },
+    ]);
+  });
+
+  it('campo em parte dos itens e zerado em alguns vira uma pendência só', () => {
+    const zerada = itemCompleto({ cbs: '0.00', aliquotaCBS: '0', valorCBS: '0.00' });
+    const r = conferirReforma(nfe([zerada, itemCompleto(), itemCompleto({ cbs: undefined })]), TABELA);
+    expect(r.pendencias).toEqual([
+      {
+        campo: 'CBS',
+        problema: 'parcial',
+        texto: 'CBS (2 de 3 itens; informada com valor zero em 1)',
+        tambem: ['zerado'],
+      },
+    ]);
+    expect(r.tipos).toEqual(['parcial', 'zerado']);
+  });
+
+  it('resumo mantém a contagem por campo quando vários vêm zerados', () => {
+    const zerada = itemCompleto({
+      cbs: '0.00', aliquotaCBS: '0', valorCBS: '0.00',
+      ibsEstadual: '0.00', aliquotaIBSUF: '0', valorIBSUF: '0.00',
+    });
+    const r = conferirReforma(nfe([itemCompleto(), zerada, zerada]), TABELA);
+    expect(r.resumo).toBe(
+      '2 pendências: IBS estadual (UF) (2 de 3 itens) e CBS (2 de 3 itens) informados com valor zero.'
+    );
+  });
+
+  it('resumo leva a contagem e todos os códigos incompatíveis', () => {
+    const r = conferirReforma(
+      nfe([itemCompleto({ cClassTrib: '200001' }), itemCompleto({ cstReforma: '200', cClassTrib: '000001' })]),
+      TABELA
+    );
+    expect(r.resumo).toBe(
+      '1 pendência: cClassTrib incompatível com o CST (2 de 2 itens): 200001 com CST 000; 000001 com CST 200.'
+    );
+  });
+
+  it('IBS municipal zero em 2026 é aceito; nota completa', () => {
+    const r = conferirReforma(nfe([itemCompleto()]), TABELA);
+    expect(r.situacao).toBe('completa');
+    expect(r.zerosAceitos).toEqual(['IBS municipal']);
+    expect(conferirReforma(nfse([]), TABELA).situacao).toBe('completa');
+  });
+
+  it('IBS municipal zero a partir de 2027 é pendência', () => {
+    const doc = { ...nfe([itemCompleto()], '2027-01-05T10:00:00.000Z'), diaEmissao: '2027-01-05' };
+    const r = conferirReforma(doc, TABELA);
+    expect(r.pendencias).toEqual([
+      { campo: 'IBS municipal', problema: 'zerado', texto: 'IBS municipal informado com valor zero' },
+    ]);
+    expect(r.zerosAceitos).toEqual([]);
+  });
+
+  it('IBS municipal ausente em 2026 continua pendência', () => {
+    const r = conferirReforma(nfe([itemCompleto({ ibsMunicipal: undefined })]), TABELA);
+    expect(r.pendencias.map(p => [p.campo, p.problema])).toEqual([['IBS municipal', 'ausente']]);
+  });
+
+  it('com a tabela real, CST 410 e cClassTrib 410001 aceitam CBS zero', () => {
+    const r = conferirReforma(
+      nfse([], { cst: '410', cClassTrib: '410001', cbs: ZERO }),
+      tabelaCarregada()
+    );
+    expect(r.pendencias).toEqual([]);
+    expect(r.zerosAceitos).toEqual(expect.arrayContaining(['CBS']));
+  });
+
+  it('NF-e com o campo em parte dos itens tem tipo parcial', () => {
+    const r = conferirReforma(
+      nfe([itemCompleto(), itemCompleto({ cbs: undefined })]),
+      TABELA
+    );
+    expect(r.pendencias).toEqual([
+      { campo: 'CBS', problema: 'parcial', texto: 'CBS (1 de 2 itens)' },
+    ]);
+    expect(r.tipos).toEqual(['parcial']);
+  });
+
+  it('lote Supera (2026): CST e cClassTrib ausentes; base, IBS estadual e CBS zerados', () => {
+    const r = conferirReforma(
+      nfse(['cst'], {
+        cClassTrib: undefined,
+        baseIBSCBS: 0,
+        ibsEstadual: ZERO,
+        ibsMunicipal: ZERO,
+        cbs: ZERO,
+      }),
+      TABELA
+    );
+    expect(r.pendencias.map(p => [p.texto, p.problema])).toEqual([
+      ['CST do IBS/CBS', 'ausente'],
+      ['cClassTrib', 'ausente'],
+      ['Base de cálculo do IBS/CBS informada com valor zero', 'zerado'],
+      ['IBS estadual (UF) informado com valor zero', 'zerado'],
+      ['CBS informada com valor zero', 'zerado'],
+    ]);
+    expect(r.resumo).toBe(
+      '5 pendências: faltam CST do IBS/CBS e cClassTrib; Base de cálculo do IBS/CBS, ' +
+        'IBS estadual (UF) e CBS informados com valor zero.'
+    );
+  });
+
+  it('resume a nota completa e a incompatível numa frase', () => {
+    expect(conferirReforma(nfe([itemCompleto()]), TABELA).resumo).toBe(
+      'Campos da reforma completos e cClassTrib compatível com o CST.'
+    );
+    expect(
+      conferirReforma(nfe([itemCompleto({ cClassTrib: '200001' })]), TABELA).resumo
+    ).toBe('1 pendência: cClassTrib incompatível com o CST: 200001 com CST 000.');
+  });
+
+  it('Imposto Seletivo zero continua só informativo', () => {
+    const r = conferirReforma(nfe([itemCompleto({ impostoSeletivo: '0.00' })]), TABELA);
+    expect(r.situacao).toBe('completa');
+  });
+});
+
 describe('resumoPorSentido', () => {
   it('4 entradas exigíveis, 3 completas: 75%', () => {
     const r = resumoPorSentido([
@@ -259,11 +442,57 @@ describe('consolidadoPorCampo', () => {
     ].map(doc => ({ tipo: doc.tipo, conferencia: conferirReforma(doc, TABELA) }));
 
     const linhas = consolidadoPorCampo(docs);
-    expect(linhas.find(l => l.problema === 'CBS')).toEqual({ problema: 'CBS', entradas: 1, saidas: 1, semVinculo: 0, total: 2 });
-    expect(linhas.find(l => l.problema === 'cClassTrib incompatível com o CST')).toEqual({
-      problema: 'cClassTrib incompatível com o CST', entradas: 0, saidas: 1, semVinculo: 0, total: 1,
-    });
-    expect(linhas.find(l => l.problema === 'cClassTrib')?.total).toBe(0);
+    expect(linhas.find(l => l.problema === 'CBS: ausente')).toEqual(
+      expect.objectContaining({ campo: 'CBS', tipo: 'ausente', entradas: 1, saidas: 1, semVinculo: 0, total: 2 })
+    );
+    expect(linhas.find(l => l.problema === 'cClassTrib incompatível com o CST')).toEqual(
+      expect.objectContaining({ entradas: 0, saidas: 1, semVinculo: 0, total: 1 })
+    );
+    expect(linhas.find(l => l.problema === 'cClassTrib: ausente')?.total).toBe(0);
+  });
+
+  it('separa ausente e zerado do mesmo campo', () => {
+    const zerada = itemCompleto({ cbs: '0.00', aliquotaCBS: '0', valorCBS: '0.00' });
+    const docs = [
+      nfe([zerada], undefined, 'entrada'),
+      nfe([{ ...itemCompleto(), cbs: undefined }], undefined, 'entrada'),
+      nfe([zerada], undefined, 'saida'),
+    ].map(doc => ({ tipo: doc.tipo, conferencia: conferirReforma(doc, TABELA) }));
+
+    const linhas = consolidadoPorCampo(docs);
+    const linha = (r: string) => linhas.find(l => l.problema === r);
+    expect(linha('CBS: zerado')).toEqual(expect.objectContaining({ entradas: 1, saidas: 1, total: 2 }));
+    expect(linha('CBS: ausente')).toEqual(expect.objectContaining({ entradas: 1, saidas: 0, total: 1 }));
+    expect(linha('CBS: parcial')?.total).toBe(0);
+    // IBS municipal zero em 2026 é aceito: nenhuma nota na linha
+    expect(linha('IBS municipal: zerado')?.total).toBe(0);
+  });
+});
+
+describe('conferirCamposNFe: soma dos itens', () => {
+  const campo = (campos: ReturnType<typeof conferirCamposNFe>, nome: string) =>
+    campos.find(c => c.grupo === 'reforma' && c.campo === nome)!;
+
+  it('soma base e valor, alíquota só quando igual, e conta os zerados', () => {
+    const campos = conferirCamposNFe([
+      itemCompleto({ baseIBSCBS: '100.00', cbs: '0.90', aliquotaCBS: '0.9', valorCBS: '0.90' }),
+      itemCompleto({ baseIBSCBS: '200.50', cbs: '1.60', aliquotaCBS: '0.8', valorCBS: '1.60' }),
+      itemCompleto({ baseIBSCBS: '50.00', cbs: '0.00', aliquotaCBS: '0', valorCBS: '0.00' }),
+    ]);
+    expect(campo(campos, 'Base de cálculo IBS/CBS').base).toBe(350.5);
+    const cbs = campo(campos, 'CBS');
+    expect(cbs.valorNumerico).toBe(2.5);
+    expect(cbs.aliquota).toBeUndefined();
+    expect(cbs.itens).toEqual({ com: 3, total: 3, zerados: 1 });
+    expect(cbs.zerado).toBeUndefined();
+  });
+
+  it('alíquota igual em todos os itens aparece; zero em todos marca zerado', () => {
+    const zerada = itemCompleto({ cbs: '0.00', aliquotaCBS: '0.9', valorCBS: '0.00' });
+    const cbs = campo(conferirCamposNFe([zerada, zerada]), 'CBS');
+    expect(cbs.aliquota).toBe(0.9);
+    expect(cbs.itens).toEqual({ com: 2, total: 2, zerados: 2 });
+    expect(cbs.zerado).toBe(true);
   });
 });
 
