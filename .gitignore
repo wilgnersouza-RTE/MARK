@@ -11,7 +11,7 @@ build/
 .env.*.local
 
 # Dados gravados em execução — contêm hashes de senha e tokens de recuperação.
-# As tabelas fiscais (tax-rules, cclasstrib, reforma-transicao) SÃO versionadas;
+# As tabelas fiscais (tax-rules, cclasstrib) SÃO versionadas;
 # apenas o cadastro de usuários fica de fora.
 backend/data/usuarios.json
 usuarios.json
