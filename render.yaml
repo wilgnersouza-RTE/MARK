@@ -48,7 +48,7 @@ services:
       # Em produção o CORS aceita SOMENTE o que estiver aqui.
       # Aceita várias origens separadas por vírgula.
       - key: CORS_ORIGIN
-        value: https://mark-4-yksf.vercel.app
+        value: https://mark-six-navy.vercel.app
 
       # As tabelas fiscais (tax-rules, cclasstrib, reforma-transicao) vêm do
       # repositório — NÃO aponte DATA_DIR para o disco, senão elas somem.
