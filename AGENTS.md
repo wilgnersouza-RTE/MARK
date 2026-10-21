@@ -3,7 +3,7 @@
 
 ## MARK (NFe Validator)
 
-Análise tributária de documentos fiscais (NF-e 55, NFC-e 65, CT-e 57/67 e NFS-e) para a Reforma Tributária do Consumo. Backend Express + TypeScript em `backend/`, frontend React + Vite + Tailwind em `frontend/`. Backend no Render, frontend na Vercel (https://mark-4-yksf.vercel.app). Use como referência só `COMO_RODAR.md` e `DEPLOY.md`; os demais `.md` da raiz estão desatualizados.
+Análise tributária de documentos fiscais (NF-e 55, NFC-e 65, CT-e 57/67 e NFS-e) para a Reforma Tributária do Consumo. Backend Express + TypeScript em `backend/`, frontend React + Vite + Tailwind em `frontend/`. Backend no Render, frontend na Vercel (https://mark-six-navy.vercel.app). Use como referência só `COMO_RODAR.md` e `DEPLOY.md`; os demais `.md` da raiz estão desatualizados.
 
 ## Política
 
