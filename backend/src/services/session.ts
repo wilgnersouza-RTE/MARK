@@ -1,5 +1,14 @@
-import { UserSession, NFeDocument, DashboardData, ImportacaoArquivo } from '../types';
+import { UserSession, NFeDocument, DashboardData, ImportacaoArquivo, EmpresaAnalisada } from '../types';
 import { dashboardService } from './dashboard';
+import { classificarSentido, identificarEmpresa, normalizarCnpj } from '../utils/sentidoImportacao';
+
+/** CNPJ informado não aparece em nenhuma nota do lote vigente. */
+export class ErroEmpresaForaDoLote extends Error {
+  constructor(cnpj: string) {
+    super(`O CNPJ ${cnpj || '(vazio)'} não aparece em nenhuma nota do lote importado.`);
+    this.name = 'ErroEmpresaForaDoLote';
+  }
+}
 
 /**
  * Gerencia sessões de usuário em memória
@@ -65,7 +74,8 @@ export class SessionService {
   async adicionarDocumentos(
     sessionId: string,
     documentos: NFeDocument[],
-    importacao: ImportacaoArquivo
+    importacao: ImportacaoArquivo,
+    empresa: EmpresaAnalisada | null
   ): Promise<UserSession> {
     const sessao = this.sessions.get(sessionId);
 
@@ -75,12 +85,14 @@ export class SessionService {
 
     const anteriores = sessao.documentos.length;
 
-    // Troca, não soma.
-    sessao.documentos = [...documentos];
+    // Troca, não soma. A empresa do lote anterior também sai: sem empresa,
+    // as notas ficam com sentido indefinido até o contador escolher.
+    sessao.empresa = empresa ?? undefined;
+    sessao.documentos = classificarSentido(documentos, empresa?.cnpj);
 
     // O histórico guarda só a importação vigente, para o painel e a lista de
     // importações contarem a mesma história.
-    sessao.importacoes = [importacao];
+    sessao.importacoes = [{ ...importacao, documentos: sessao.documentos }];
 
     if (anteriores > 0) {
       console.log(
@@ -90,6 +102,38 @@ export class SessionService {
     }
 
     // Regenerar dashboard
+    sessao.dashboard = await dashboardService.generateDashboard(sessao.documentos);
+    sessao.ultimaAtualizacao = new Date().toISOString();
+
+    return sessao;
+  }
+
+  /**
+   * Troca a empresa analisada e reclassifica as notas já importadas.
+   *
+   * Só aceita CNPJ presente no lote, como emitente ou destinatário ou
+   * tomador: escolher uma empresa que não aparece em nota nenhuma deixaria
+   * todas sem vínculo.
+   */
+  async definirEmpresa(sessionId: string, cnpj: string): Promise<UserSession> {
+    const sessao = this.sessions.get(sessionId);
+
+    if (!sessao) {
+      throw new Error('Sessão não encontrada');
+    }
+
+    const alvo = normalizarCnpj(cnpj);
+    const candidato = alvo
+      ? identificarEmpresa(sessao.documentos).todos.find(c => c.cnpj === alvo)
+      : undefined;
+
+    if (!candidato) {
+      throw new ErroEmpresaForaDoLote(cnpj);
+    }
+
+    sessao.empresa = { cnpj: candidato.cnpj, nome: candidato.nome, inferida: false };
+    sessao.documentos = classificarSentido(sessao.documentos, candidato.cnpj);
+    sessao.importacoes = sessao.importacoes.map(i => ({ ...i, documentos: sessao.documentos }));
     sessao.dashboard = await dashboardService.generateDashboard(sessao.documentos);
     sessao.ultimaAtualizacao = new Date().toISOString();
 
@@ -107,6 +151,7 @@ export class SessionService {
     }
 
     sessao.documentos = [];
+    sessao.empresa = undefined;
     sessao.dashboard = null;
     sessao.importacoes = [];
     sessao.ultimaAtualizacao = new Date().toISOString();
@@ -189,6 +234,8 @@ export class SessionService {
 export const sessionService = new SessionService();
 
 // Limpeza automática a cada 6 horas
+// unref: a limpeza não deve, sozinha, manter o processo vivo (testes e
+// encerramento do servidor).
 setInterval(() => {
   sessionService.limparSessoesExpiradas();
-}, 6 * 60 * 60 * 1000);
+}, 6 * 60 * 60 * 1000).unref();

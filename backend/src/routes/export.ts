@@ -4,17 +4,18 @@
  */
 import { Router, Request, Response } from 'express';
 import * as XLSX from 'xlsx';
-import { rotuloModelo } from '../utils/modelos';
 import { authenticate } from '../middleware/auth';
 import { sessionService } from '../services/session';
 import { excelExportService } from '../services/export';
 import { dashboardService } from '../services/dashboard';
+import { filtrarDocumentos, lerFiltros } from '../utils/filtros';
 
 const router = Router();
 
 /**
  * GET /api/v1/export/excel
- * Exportar análise completa em arquivo Excel
+ * Exportar a análise em Excel. Aceita os mesmos filtros do dashboard
+ * (?sentido=&cfop=&ncm=), para a planilha sair com o recorte da tela.
  */
 router.get('/excel', authenticate, async (req: Request, res: Response) => {
   try {
@@ -28,12 +29,22 @@ router.get('/excel', authenticate, async (req: Request, res: Response) => {
       });
     }
 
-    const documentos = sessionService.obterDocumentos(sessionId);
+    const doLote = sessionService.obterDocumentos(sessionId);
 
-    if (!documentos || documentos.length === 0) {
+    if (!doLote || doLote.length === 0) {
       return res.status(400).json({
         success: false,
         error: 'Nenhum documento para exportar',
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    const documentos = filtrarDocumentos(doLote, lerFiltros(req.query));
+
+    if (documentos.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Nenhuma nota com os filtros escolhidos',
         timestamp: new Date().toISOString(),
       });
     }
@@ -42,7 +53,8 @@ router.get('/excel', authenticate, async (req: Request, res: Response) => {
     const dashboard = await dashboardService.generateDashboard(documentos);
 
     // Exportar para Excel
-    const buffer = excelExportService.exportarDados(documentos, dashboard);
+    const temEmpresa = !!sessionService.obterSessao(sessionId)?.empresa;
+    const buffer = excelExportService.exportarDados(documentos, dashboard, temEmpresa);
 
     // Enviar arquivo
     const filename = `nfe-analise-${new Date().getTime()}.xlsx`;
@@ -114,10 +126,8 @@ router.get('/json', authenticate, async (req: Request, res: Response) => {
  */
 router.post('/erros-importacao', authenticate, async (req: Request, res: Response) => {
   try {
-    const { erros, tipo, modelo } = req.body as {
+    const { erros } = req.body as {
       erros?: Array<{ nomeArquivo: string; erro: string }>;
-      tipo?: string;
-      modelo?: string;
     };
 
     if (!Array.isArray(erros) || erros.length === 0) {
@@ -133,18 +143,13 @@ router.post('/erros-importacao', authenticate, async (req: Request, res: Respons
       Arquivo: (e.nomeArquivo || '').split('/').pop() || e.nomeArquivo,
       'Caminho no ZIP': e.nomeArquivo,
       Motivo: e.erro,
-      'Tipo selecionado': tipo === 'saida' ? 'Saída' : 'Entrada',
-      'Modelo selecionado': rotuloModelo(String(modelo ?? '')),
       'Data da importação': new Date().toLocaleString('pt-BR'),
     }));
 
     const planilha = XLSX.utils.json_to_sheet(linhas);
 
     // Larguras fixas: o motivo é a coluna longa e precisa caber na tela
-    planilha['!cols'] = [
-      { wch: 5 }, { wch: 42 }, { wch: 52 }, { wch: 68 },
-      { wch: 18 }, { wch: 20 }, { wch: 20 },
-    ];
+    planilha['!cols'] = [{ wch: 5 }, { wch: 42 }, { wch: 52 }, { wch: 68 }, { wch: 20 }];
 
     const livro = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(livro, planilha, 'Arquivos recusados');

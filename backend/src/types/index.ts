@@ -49,7 +49,14 @@ export interface AuthResponse {
  * o padrão nacional a identifica pela própria estrutura do XML.
  */
 export type NFeModel = 55 | 65 | 57 | 67 | 'NFSE';
-export type DocumentType = 'Entrada' | 'Saída' | 'entrada' | 'saida';
+/**
+ * Sentido da nota do ponto de vista da empresa analisada.
+ *
+ * 'indefinido' vale para a nota recém-lida, antes de a empresa ser
+ * identificada, e para a nota em que a empresa não é emitente nem
+ * destinatária ou tomadora.
+ */
+export type DocumentType = 'entrada' | 'saida' | 'indefinido';
 export type RegimeTributario = 'Regime-Regular' | 'Simples-Nacional' | 'Lucro-Real' | 'Lucro-Presumido';
 
 export type RegimeTributarioAlias = RegimeTributario | 'simples' | 'lucro-real' | 'lucro-presumido' | 'regime-regular';
@@ -111,6 +118,13 @@ export interface NFeDocument {
   divergencias: Divergencia[];
   /** Conferência de preenchimento dos campos tributários da nota */
   camposTributarios?: CampoTributario[];
+  /**
+   * CFOPs distintos da nota: dos itens na NF-e e NFC-e, da operação no
+   * CT-e. Vazio na NFS-e, que não tem CFOP.
+   */
+  cfops: string[];
+  /** NCMs distintos dos itens. Só NF-e e NFC-e têm NCM; vazio nos demais. */
+  ncms: string[];
 }
 
 /**
@@ -176,7 +190,6 @@ export interface DashboardData {
   porRegime: RegimeDados[];
   porFornecedor: FornecedorDados[];
   divergencias: Divergencia[];
-  transicaoAnual: TransicaoAnual;
 }
 
 export interface ResumoGeral {
@@ -238,29 +251,9 @@ export interface FornecedorDados {
   conformidade: number;
 }
 
-export interface TransicaoAnual {
-  anos: number[];
-  tributos: {
-    icms: number[];
-    iss: number[];
-    pis: number[];
-    cofins: number[];
-    irrf: number[];
-  };
-  projecoes: {
-    icms: number[];
-    iss: number[];
-    pis: number[];
-    cofins: number[];
-    irrf: number[];
-  };
-}
-
 // ==================== Upload e Processamento ====================
 export interface ImportacaoArquivo {
   sessionId: string;
-  tipo: DocumentType;
-  modelo: NFeModel;
   quantidadeArquivos: number;
   arquivosProcessados: number;
   arquivosComErro: number;
@@ -294,11 +287,18 @@ export interface ExcelExportOptions {
   incluirGraficos: boolean;
   incluirValidacoes: boolean;
   incluirDivergencias: boolean;
-  incluirTransicao: boolean;
   idioma: 'pt-BR' | 'en-US';
 }
 
 // ==================== Sessão ====================
+/** Empresa cujo ponto de vista define entrada e saída no lote. */
+export interface EmpresaAnalisada {
+  cnpj: string;
+  nome: string;
+  /** true quando o sistema identificou sozinho; false quando o contador escolheu */
+  inferida: boolean;
+}
+
 export interface UserSession {
   sessionId: string;
   userId: string;
@@ -307,4 +307,6 @@ export interface UserSession {
   dashboard: DashboardData | null;
   ultimaAtualizacao: string;
   importacoes: ImportacaoArquivo[];
+  /** Empresa analisada no lote vigente; ausente enquanto não identificada */
+  empresa?: EmpresaAnalisada;
 }

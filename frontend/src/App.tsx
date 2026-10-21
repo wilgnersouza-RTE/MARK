@@ -1,40 +1,54 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import axios from 'axios';
 import {
-  BarChart, Bar, LineChart, Line, Cell, LabelList,
+  BarChart, Bar, Cell, LabelList,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
 import {
-  Upload, Download, LogOut, FileText, TrendingUp, AlertTriangle,
-  CheckCircle, XCircle, Calendar, Building2, DollarSign, Settings, Shield,
+  Upload, LogOut, FileText, TrendingUp, AlertTriangle,
+  CheckCircle, XCircle, Calendar, Building2, DollarSign, Shield,
   ChevronDown, Users, ArrowLeft, FileSpreadsheet
 } from 'lucide-react';
 
 import { MarcaRTE } from './components/Marca';
 import { Tooltip as DicaHover, AjudaIcone, MemoriaCalculo } from './components/Tooltip';
-import { AbaReforma } from './components/AbaReforma';
 import { CamposTributarios } from './components/CamposTributarios';
 import { AbaAdministracao } from './components/AbaAdministracao';
 import { TelaLogin } from './components/TelaLogin';
 import { PainelExecutivo } from './components/PainelExecutivo';
 import { API_URL } from './utils/api';
 import {
-  ConfiguracoesImportacao,
-  CONFIGURACAO_PADRAO,
-  type ConfiguracaoImportacao as TipoConfig,
-} from './components/ConfiguracoesImportacao';
+  FiltrosAnalise,
+  paraParametros,
+  type EstadoFiltros,
+  type OpcoesFiltros,
+} from './components/FiltrosAnalise';
 import {
   formatarMoeda, formatarMoedaCompacta, formatarInteiro,
   formatarPercentual, formatarCNPJ,
 } from './utils/format';
-import {
-  MODELOS_DOCUMENTO,
-  type ModeloDocumento,
-  type ArquivoRejeitado,
-} from './utils/modelos';
+import { type ArquivoRejeitado } from './utils/modelos';
 
 
 // ==================== TIPOS ====================
+
+/** Candidato a empresa analisada, como o backend devolve no upload. */
+interface CandidatoEmpresa {
+  cnpj: string;
+  nome: string;
+  quantidadeNotas: number;
+}
+
+/** Resumo do lote vigente, devolvido por /upload/nfe e /upload/empresa. */
+interface ResumoLote {
+  documentosImportados?: number;
+  totalDocumentosSessao?: number;
+  porModelo: { modelo: string; rotulo: string; quantidade: number }[];
+  porSentido: { entrada: number; saida: number; indefinido: number };
+  empresa: { cnpj: string; nome: string; inferida: boolean } | null;
+  candidatosEmpresa: CandidatoEmpresa[];
+  precisaEscolherEmpresa: boolean;
+}
 
 
 interface ResumoGeral {
@@ -65,16 +79,6 @@ interface RegimeDados {
     cofins: number;
     irrf: number;
   };
-}
-
-interface FornecedorDados {
-  cnpj: string;
-  nome: string;
-  regime: string;
-  quantidade: number;
-  valor: number;
-  tributos: number;
-  conformidade: number;
 }
 
 // ==================== STORE ====================
@@ -145,8 +149,8 @@ const useAppStore = () => {
 const Header: React.FC<{
   user: any;
   onLogout: () => void;
-  /** Navegação para as páginas fora do painel (administração, configurações). */
-  onIrPara: (pagina: 'admin' | 'config') => void;
+  /** Navegação para as páginas fora do painel (administração). */
+  onIrPara: (pagina: 'admin') => void;
 }> = ({ user, onLogout, onIrPara }) => {
   const [menuAberto, setMenuAberto] = useState(false);
 
@@ -248,17 +252,6 @@ const Header: React.FC<{
                   )}
                   <button
                     role="menuitem"
-                    onClick={() => {
-                      setMenuAberto(false);
-                      onIrPara('config');
-                    }}
-                    className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-sm text-tinta-forte transition hover:bg-fundo-eleva"
-                  >
-                    <Settings size={16} className="text-tinta-suave" />
-                    Configurações
-                  </button>
-                  <button
-                    role="menuitem"
                     onClick={onLogout}
                     className="flex w-full items-center gap-2.5 border-t border-fundo-borda px-3.5 py-2.5 text-sm text-red-600 transition hover:bg-red-50"
                   >
@@ -337,21 +330,47 @@ const UploadSection: React.FC<{
   sessionId: string;
   token: string;
   onUploadSuccess: () => Promise<void>;
-  config: TipoConfig;
-  onConfigChange: (c: TipoConfig) => void;
-}> = ({ sessionId, token, onUploadSuccess, config, onConfigChange }) => {
+}> = ({ sessionId, token, onUploadSuccess }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [tipo, setTipo] = useState<'entrada' | 'saida'>('entrada');
-  const [modelo, setModelo] = useState<ModeloDocumento>('55');
-  // Arquivos que o ZIP trazia mas que não batiam com o que foi selecionado.
+  // Arquivos do ZIP que não puderam ser lidos, com o motivo.
   const [rejeitados, setRejeitados] = useState<ArquivoRejeitado[]>([]);
   const [baixandoErros, setBaixandoErros] = useState(false);
-  // Preenchido quando o lote não permitiu conferir entrada x saída.
-  const [sentidoNaoVerificado, setSentidoNaoVerificado] = useState<string | null>(null);
   // Quantos documentos da importação anterior foram descartados.
   const [substituidos, setSubstituidos] = useState(0);
-  const [mostrarConfig, setMostrarConfig] = useState(false);
+  // Resumo do lote vigente: modelos, sentidos e empresa analisada.
+  const [lote, setLote] = useState<ResumoLote | null>(null);
+  const [arrastando, setArrastando] = useState(false);
+  // Lista de CNPJs aberta pelo botão "Alterar".
+  const [alterandoEmpresa, setAlterandoEmpresa] = useState(false);
+  const [salvandoEmpresa, setSalvandoEmpresa] = useState(false);
+  const [erroEmpresa, setErroEmpresa] = useState<string | null>(null);
+
+  /**
+   * Troca a empresa analisada. O servidor reclassifica as notas já
+   * importadas; não há novo upload.
+   */
+  const escolherEmpresa = async (cnpj: string) => {
+    setSalvandoEmpresa(true);
+    setErroEmpresa(null);
+    try {
+      const resposta = await axios.post(
+        `${API_URL}/api/v1/upload/empresa`,
+        { cnpj },
+        { headers: { Authorization: `Bearer ${token}`, 'x-session-id': sessionId } }
+      );
+      const atualizado = resposta.data?.data?.importacao;
+      if (atualizado) {
+        setLote(atual => (atual ? { ...atual, ...atualizado } : atualizado));
+      }
+      setAlterandoEmpresa(false);
+      await onUploadSuccess();
+    } catch (error: any) {
+      setErroEmpresa(error.response?.data?.error || 'Não foi possível trocar a empresa analisada.');
+    } finally {
+      setSalvandoEmpresa(false);
+    }
+  };
 
   /**
    * Baixa a planilha com todos os arquivos recusados.
@@ -364,7 +383,7 @@ const UploadSection: React.FC<{
     try {
       const resposta = await axios.post(
         `${API_URL}/api/v1/export/erros-importacao`,
-        { erros: rejeitados, tipo, modelo },
+        { erros: rejeitados },
         {
           headers: { Authorization: `Bearer ${token}`, 'x-session-id': sessionId },
           responseType: 'blob',
@@ -384,8 +403,9 @@ const UploadSection: React.FC<{
     }
   };
 
-  const handleFileUpload = async (file: File) => {
-    if (!file.name.endsWith('.zip')) {
+  const handleFileUpload = async (file: File | undefined) => {
+    if (!file || isUploading) return;
+    if (!file.name.toLowerCase().endsWith('.zip')) {
       setUploadError('Apenas arquivos ZIP são permitidos');
       return;
     }
@@ -393,16 +413,14 @@ const UploadSection: React.FC<{
     setIsUploading(true);
     setUploadError(null);
     setRejeitados([]);
-    setSentidoNaoVerificado(null);
     setSubstituidos(0);
+    setLote(null);
+    setAlterandoEmpresa(false);
+    setErroEmpresa(null);
 
     try {
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('tipo', tipo);
-      formData.append('modelo', modelo);
-      // Configurações da Reforma Tributária vão junto e ficam registradas na importação
-      formData.append('configuracao', JSON.stringify(config));
 
       const response = await axios.post(`${API_URL}/api/v1/upload/nfe`, formData, {
         headers: {
@@ -416,9 +434,7 @@ const UploadSection: React.FC<{
         // Importação parcial: alguns XMLs entraram, outros foram recusados.
         // Antes isso passava em silêncio e o usuário só via o total errado.
         setRejeitados(response.data.data?.erros ?? []);
-        setSentidoNaoVerificado(
-          response.data.data?.importacao?.sentidoNaoVerificado ?? null
-        );
+        setLote(response.data.data?.importacao ?? null);
         setSubstituidos(response.data.data?.importacao?.documentosSubstituidos ?? 0);
         await onUploadSuccess();
       } else {
@@ -433,73 +449,171 @@ const UploadSection: React.FC<{
     }
   };
 
+  const mostrarCandidatos = !!lote && (lote.precisaEscolherEmpresa || alterandoEmpresa);
+
   return (
     <Card className="border-2 border-dashed border-marca-azul/40 bg-marca-azul/[0.06]">
       <div className="text-center">
-        <Upload className="mx-auto mb-4 text-marca-azul" size={40} />
         <div className="mb-4 flex items-center justify-center gap-2">
           <h3 className="text-lg font-semibold">Importar Notas Fiscais</h3>
           <AjudaIcone
-            largura={340}
+            largura={360}
             conteudo={
               <MemoriaCalculo
-                titulo="Como a importação é validada"
-                descricao="Cada XML do ZIP é conferido contra o tipo e o modelo selecionados antes de entrar na base."
+                titulo="Como a importação funciona"
+                descricao="Envie o ZIP do mês com todas as notas juntas, de entrada e de saída. Não é preciso escolher nada antes."
                 linhas={[
-                  { rotulo: 'Modelo', valor: 'comparado à tag mod do XML' },
-                  { rotulo: 'Conteúdo', valor: 'precisa ter valores fiscais' },
-                  { rotulo: 'Recusados', valor: 'listados com o motivo' },
+                  { rotulo: 'Modelo', valor: 'NF-e, NFC-e, CT-e, CT-e OS e NFS-e, lido do próprio XML' },
+                  { rotulo: 'Empresa', valor: 'o CNPJ que aparece em pelo menos 80% das notas' },
+                  { rotulo: 'Entrada', valor: 'a empresa é destinatária ou tomadora' },
+                  { rotulo: 'Saída', valor: 'a empresa é emitente' },
+                  { rotulo: 'Recusados', valor: 'XML corrompido, sem valores ou desconhecido' },
                 ]}
-                origem="Arquivo de modelo diferente do selecionado é recusado individualmente, sem derrubar a importação inteira."
+                origem="Se a empresa não puder ser identificada, a tela lista os CNPJs do lote para você escolher. A escolha pode ser trocada depois, sem novo upload."
               />
             }
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-4 mb-4">
-          <div>
-            <label className="block text-sm font-medium text-tinta-media mb-2">Tipo</label>
-            <select
-              value={tipo}
-              onChange={e => setTipo(e.target.value as 'entrada' | 'saida')}
-              className="w-full px-3 py-2 border border-fundo-borda rounded-lg"
-            >
-              <option value="entrada">Entrada</option>
-              <option value="saida">Saída</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-tinta-media mb-2">Modelo</label>
-            <select
-              value={modelo}
-              onChange={e => setModelo(e.target.value as ModeloDocumento)}
-              className="w-full px-3 py-2 border border-fundo-borda rounded-lg"
-            >
-              {MODELOS_DOCUMENTO.map(m => (
-                <option key={m.codigo} value={m.codigo}>
-                  {m.nome} ({m.codigo})
-                </option>
-              ))}
-            </select>
-          </div>
+        {/*
+          Área de arrastar e soltar. O botão continua para quem prefere
+          escolher o arquivo; os dois caminhos chamam o mesmo envio.
+        */}
+        <div
+          onDragOver={e => {
+            e.preventDefault();
+            if (!isUploading) setArrastando(true);
+          }}
+          onDragLeave={e => {
+            e.preventDefault();
+            // Passar sobre o ícone, o texto ou o botão também dispara
+            // dragleave; só apaga o destaque quando sai da área de fato.
+            if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+            setArrastando(false);
+          }}
+          onDrop={e => {
+            e.preventDefault();
+            setArrastando(false);
+            handleFileUpload(e.dataTransfer.files?.[0]);
+          }}
+          className={`rounded-xl border-2 border-dashed px-4 py-8 transition ${
+            arrastando ? 'border-marca-azul bg-marca-azul/10' : 'border-fundo-borda'
+          }`}
+        >
+          <Upload className="mx-auto mb-3 text-marca-azul" size={40} />
+          <p className="mb-4 text-sm text-tinta-media">
+            {isUploading
+              ? 'Processando o ZIP...'
+              : arrastando
+                ? 'Solte o ZIP para importar'
+                : 'Arraste o ZIP do mês para cá ou'}
+          </p>
+
+          <input
+            type="file"
+            accept=".zip"
+            onChange={e => {
+              handleFileUpload(e.target.files?.[0]);
+              // Permite reenviar o mesmo arquivo em seguida.
+              e.target.value = '';
+            }}
+            disabled={isUploading}
+            className="hidden"
+            id="file-input"
+          />
+          <label
+            htmlFor="file-input"
+            className={`inline-block rounded-lg bg-gradient-to-r from-marca-azul to-marca-roxo px-6 py-3 font-semibold text-white shadow-neon transition hover:opacity-90 ${
+              isUploading ? 'pointer-events-none opacity-50' : 'cursor-pointer'
+            }`}
+          >
+            {isUploading ? 'Processando...' : 'Escolher arquivo ZIP'}
+          </label>
         </div>
 
-        <input
-          type="file"
-          accept=".zip"
-          onChange={e => e.target.files && handleFileUpload(e.target.files[0])}
-          disabled={isUploading}
-          className="hidden"
-          id="file-input"
-        />
-        <label
-          htmlFor="file-input"
-          className="inline-block cursor-pointer rounded-lg bg-gradient-to-r from-marca-azul to-marca-roxo px-6 py-3 font-semibold text-white shadow-neon transition hover:opacity-90 disabled:opacity-50"
-        >
-          {isUploading ? 'Processando...' : 'Escolher arquivo ZIP'}
-        </label>
-
         {uploadError && <p className="mt-4 text-sm text-red-600">{uploadError}</p>}
+
+        {lote && (
+          <div className="mt-4 rounded-lg border border-fundo-borda bg-fundo-card p-4 text-left text-sm">
+            <p className="font-semibold text-tinta-forte">
+              {formatarInteiro(lote.totalDocumentosSessao ?? lote.documentosImportados ?? 0)} nota
+              {(lote.totalDocumentosSessao ?? lote.documentosImportados ?? 0) === 1 ? '' : 's'} importada
+              {(lote.totalDocumentosSessao ?? lote.documentosImportados ?? 0) === 1 ? '' : 's'}
+            </p>
+            <p className="mt-1 text-xs text-tinta-media">
+              {lote.porModelo.map(m => `${m.rotulo}: ${formatarInteiro(m.quantidade)}`).join(' · ')}
+            </p>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              <span className="rounded-full bg-marca-azul/10 px-3 py-1 text-xs font-semibold text-marca-azul">
+                Entradas: {formatarInteiro(lote.porSentido.entrada)}
+              </span>
+              <span className="rounded-full bg-marca-roxo/10 px-3 py-1 text-xs font-semibold text-marca-roxo">
+                Saídas: {formatarInteiro(lote.porSentido.saida)}
+              </span>
+              <span className="rounded-full bg-fundo-eleva px-3 py-1 text-xs font-semibold text-tinta-media">
+                Sem vínculo: {formatarInteiro(lote.porSentido.indefinido)}
+              </span>
+            </div>
+
+            {lote.empresa ? (
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-tinta-media">
+                <Building2 size={14} className="text-marca-azul" />
+                <span>
+                  Empresa analisada:{' '}
+                  <strong className="text-tinta-forte">{lote.empresa.nome}</strong> (
+                  {formatarCNPJ(lote.empresa.cnpj)}){' '}
+                  {lote.empresa.inferida ? '— identificada pelo lote' : '— escolhida por você'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setAlterandoEmpresa(v => !v)}
+                  className="rounded-md border border-marca-azul/40 px-2 py-0.5 font-semibold text-marca-azul transition hover:bg-marca-azul/10"
+                >
+                  {alterandoEmpresa ? 'Cancelar' : 'Alterar'}
+                </button>
+              </div>
+            ) : (
+              <p className="mt-3 rounded-lg border border-amber-400/60 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                Não foi possível identificar a empresa analisada neste lote. Escolha abaixo
+                qual CNPJ é o da empresa; até lá, as notas ficam sem entrada ou saída.
+              </p>
+            )}
+
+            {mostrarCandidatos && (
+              <div className="mt-3">
+                <p className="mb-2 text-xs font-semibold text-tinta-media">
+                  CNPJs encontrados no lote
+                </p>
+                <ul className="space-y-1">
+                  {lote.candidatosEmpresa.map(c => (
+                    <li key={c.cnpj}>
+                      <button
+                        type="button"
+                        disabled={salvandoEmpresa || lote.empresa?.cnpj === c.cnpj}
+                        onClick={() => escolherEmpresa(c.cnpj)}
+                        className="flex w-full flex-wrap items-center justify-between gap-2 rounded-lg border border-fundo-borda px-3 py-2 text-left text-xs transition hover:border-marca-azul hover:bg-marca-azul/5 disabled:cursor-default disabled:opacity-60"
+                      >
+                        <span>
+                          <strong className="text-tinta-forte">{c.nome}</strong>{' '}
+                          <span className="font-mono text-tinta-suave">{formatarCNPJ(c.cnpj)}</span>
+                        </span>
+                        <span className="text-tinta-suave">
+                          {formatarInteiro(c.quantidadeNotas)} nota{c.quantidadeNotas === 1 ? '' : 's'}
+                          {lote.empresa?.cnpj === c.cnpj ? ' · atual' : ''}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                {salvandoEmpresa && (
+                  <p className="mt-2 text-xs text-tinta-suave">Reclassificando as notas...</p>
+                )}
+                {erroEmpresa && <p className="mt-2 text-xs text-red-600">{erroEmpresa}</p>}
+              </div>
+            )}
+          </div>
+        )}
 
         {substituidos > 0 && (
           <p className="mt-4 rounded-lg border border-marca-azul/40 bg-marca-azul/5 px-3 py-2 text-left text-xs text-tinta-media">
@@ -507,12 +621,6 @@ const UploadSection: React.FC<{
             {substituidos > 1 ? 's' : ''} da importação anterior
             {substituidos > 1 ? ' foram descartados' : ' foi descartado'}. Cada
             importação recomeça a análise do zero.
-          </p>
-        )}
-
-        {sentidoNaoVerificado && (
-          <p className="mt-4 rounded-lg border border-fundo-borda bg-fundo-eleva px-3 py-2 text-left text-xs text-tinta-media">
-            Entrada ou saída não pôde ser conferido neste lote. {sentidoNaoVerificado}
           </p>
         )}
 
@@ -557,64 +665,125 @@ const UploadSection: React.FC<{
           Máximo 50MB • ZIP contendo XMLs • cada importação substitui a anterior
         </p>
 
-        {/* Configurações da Reforma Tributária do Consumo (IT 2025.002) */}
-        <div className="mt-6 border-t border-fundo-borda border-marca-azul/30 pt-4">
-          <button
-            type="button"
-            onClick={() => setMostrarConfig(v => !v)}
-            className="mx-auto flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-marca-azul transition hover:bg-marca-azul/10"
-          >
-            <Settings size={16} />
-            Configurações da Reforma Tributária
-            <span className="text-xs font-normal text-tinta-suave">
-              {mostrarConfig ? '(ocultar)' : '(CST, cClassTrib e demais campos)'}
-            </span>
-          </button>
-        </div>
       </div>
-
-      {mostrarConfig && (
-        <div className="mt-4 rounded-lg border border-marca-azul/30 bg-fundo-card p-4 text-left">
-          <ConfiguracoesImportacao valor={config} onChange={onConfigChange} />
-        </div>
-      )}
     </Card>
   );
 };
 
 // Dashboard Content
+/**
+ * Painel do lote, com a barra de filtros comum a todas as abas.
+ *
+ * O estado dos filtros vive aqui e vai em todas as buscas: indicadores do
+ * topo, Painel (com o bloco Resumo e a conferência de campos), Regimes e
+ * Exportar. Trocar de aba não mexe na seleção.
+ */
 const DashboardContent: React.FC<{
-  resumo: ResumoGeral | null;
-  regimes: RegimeDados[];
-  fornecedores: FornecedorDados[];
-  transicao: any;
-  isLoading: boolean;
+  /** Muda a cada importação ou troca de empresa: recarrega opções e filtros */
+  versaoLote: number;
   sessionId: string;
   token: string;
-  onRefresh: () => Promise<void>;
-  usuario: any;
-  onAssumirUsuario: (dados: any) => void;
-}> = ({
-  resumo,
-  regimes,
-  fornecedores,
-  transicao,
-  isLoading,
-  sessionId,
-  token,
-  onRefresh,
-  usuario,
-  onAssumirUsuario,
-}) => {
-  const [activeTab, setActiveTab] = useState('painel');
+}> = ({ versaoLote, sessionId, token }) => {
+  const [activeTab, setActiveTab] = useState<'painel' | 'regimes'>('painel');
+  const [opcoes, setOpcoes] = useState<OpcoesFiltros | null>(null);
+  const [filtros, setFiltros] = useState<EstadoFiltros | null>(null);
+  const [resumo, setResumo] = useState<ResumoGeral | null>(null);
+  const [regimes, setRegimes] = useState<RegimeDados[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  const [retraido, setRetraido] = useState(false);
+  const [exportando, setExportando] = useState(false);
+  // "Atualizar dashboard" incrementa: refaz /filtros mantendo a seleção.
+  const [recarga, setRecarga] = useState(0);
+  const ultimaVersao = useRef<number | null>(null);
+
+  const cabecalhos = { 'x-session-id': sessionId, Authorization: `Bearer ${token}` };
+
+  // Objeto estável por seleção: os filhos refazem a busca só quando ele muda.
+  const parametros = useMemo(() => (filtros ? paraParametros(filtros) : null), [filtros]);
+
+  // Busca as opções. Lote novo abre os filtros no padrão que o servidor
+  // indica; numa recarga a seleção atual é mantida (objeto novo, para todas
+  // as buscas serem refeitas).
+  useEffect(() => {
+    let ativo = true;
+    setErro(null);
+    axios
+      .get(`${API_URL}/api/v1/dashboard/filtros`, { headers: cabecalhos })
+      .then(r => {
+        if (!ativo) return;
+        const dados: OpcoesFiltros = r.data.data;
+        const padrao: EstadoFiltros = { sentido: dados.sentidoPadrao, cfop: '', ncm: '' };
+        const loteNovo = ultimaVersao.current !== versaoLote;
+        ultimaVersao.current = versaoLote;
+        setOpcoes(dados);
+        setFiltros(f => (loteNovo || !f ? padrao : { ...f }));
+      })
+      .catch(() => {
+        if (!ativo) return;
+        // Opções velhas não podem seguir valendo para um lote que não se conhece.
+        setOpcoes(null);
+        setFiltros(null);
+        setResumo(null);
+        setErro('Não foi possível carregar os filtros da análise.');
+      });
+    return () => {
+      ativo = false;
+    };
+  }, [versaoLote, recarga, sessionId, token]);
+
+  // Indicadores do topo e aba Regimes, sempre com o recorte escolhido.
+  useEffect(() => {
+    if (!parametros) return;
+    let ativo = true;
+    setIsLoading(true);
+    setErro(null);
+
+    Promise.all([
+      axios.get(`${API_URL}/api/v1/dashboard/resumo`, { headers: cabecalhos, params: parametros }),
+      axios.get(`${API_URL}/api/v1/dashboard/regimes`, { headers: cabecalhos, params: parametros }),
+    ])
+      .then(([resumoRes, regimeRes]) => {
+        if (!ativo) return;
+        setResumo(resumoRes.data.data);
+        setRegimes(regimeRes.data.data || []);
+      })
+      .catch(() => {
+        if (ativo) setErro('Erro ao carregar dashboard');
+      })
+      .finally(() => {
+        if (ativo) setIsLoading(false);
+      });
+
+    return () => {
+      ativo = false;
+    };
+  }, [parametros, sessionId, token]);
+
+  // Refaz /filtros e, com ele, todas as buscas, sem perder a seleção.
+  const onRefresh = () => {
+    setErro(null);
+    setRecarga(n => n + 1);
+  };
+
+  const botaoAtualizar = (
+    <div className="flex gap-4">
+      <button
+        onClick={onRefresh}
+        disabled={isLoading}
+        className="flex-1 rounded-lg bg-gradient-to-r from-marca-azul to-marca-roxo px-4 py-3 font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+      >
+        Atualizar dashboard
+      </button>
+    </div>
+  );
 
   const handleExportExcel = async () => {
+    setExportando(true);
     try {
       const response = await axios.get(`${API_URL}/api/v1/export/excel`, {
-        headers: {
-          'x-session-id': sessionId,
-          'Authorization': `Bearer ${token}`,
-        },
+        headers: cabecalhos,
+        params: parametros ?? {},
         responseType: 'blob',
       });
 
@@ -625,12 +794,38 @@ const DashboardContent: React.FC<{
       document.body.appendChild(link);
       link.click();
       link.parentNode?.removeChild(link);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao exportar:', error);
+      // Com responseType 'blob', o corpo de erro também chega como Blob.
+      let mensagem = 'Não foi possível exportar a planilha.';
+      try {
+        const texto = await error.response?.data?.text?.();
+        const corpo = texto ? JSON.parse(texto) : null;
+        if (corpo?.error) mensagem = corpo.error;
+      } catch {
+        // corpo ilegível: fica a mensagem genérica
+      }
+      setErro(mensagem);
+    } finally {
+      setExportando(false);
     }
   };
 
-  if (!resumo) {
+  const bannerErro = erro && (
+    <div className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-700">{erro}</div>
+  );
+
+  if (!opcoes || !filtros) {
+    // Sem opções só se chega por erro (ou antes da primeira resposta).
+    return erro ? (
+      <div className="space-y-6">
+        {bannerErro}
+        {botaoAtualizar}
+      </div>
+    ) : null;
+  }
+
+  if (opcoes.totalDocumentos === 0) {
     return (
       <div className="text-center py-12">
         <FileText size={48} className="mx-auto text-tinta-suave mb-4" />
@@ -639,8 +834,45 @@ const DashboardContent: React.FC<{
     );
   }
 
+  const cartaoFiltros = (
+    <FiltrosAnalise
+      filtros={filtros}
+      opcoes={opcoes}
+      onChange={setFiltros}
+      onExportar={handleExportExcel}
+      exportando={exportando}
+      retraido={retraido}
+      onAlternarRetraido={() => setRetraido(v => !v)}
+    />
+  );
+
+  // Lote com notas, mas indicadores ainda não carregados (ou com falha):
+  // o cartão e o botão de atualizar continuam à mão.
+  if (!resumo) {
+    return (
+      <div className="space-y-6">
+        {cartaoFiltros}
+        {bannerErro}
+        {botaoAtualizar}
+      </div>
+    );
+  }
+
+  const recorteVazio = resumo.totalDocumentos === 0;
+
   return (
     <div className="space-y-6">
+      {cartaoFiltros}
+
+      {bannerErro}
+
+      {recorteVazio && (
+        <div className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800">
+          <AlertTriangle size={16} className="shrink-0" />
+          Nenhuma nota com os filtros escolhidos
+        </div>
+      )}
+
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
@@ -651,7 +883,7 @@ const DashboardContent: React.FC<{
           memoria={
             <MemoriaCalculo
               titulo="Total de Documentos"
-              descricao="Contagem de XMLs de NF-e processados com sucesso nesta sessão."
+              descricao="Contagem de XMLs processados com sucesso nesta sessão, dentro dos filtros escolhidos."
               linhas={[]}
               resultado={{ rotulo: 'Total', valor: formatarInteiro(resumo.totalDocumentos) }}
               origem="XMLs que falharam na leitura não entram nesta contagem — eles são listados no retorno da importação."
@@ -726,13 +958,12 @@ const DashboardContent: React.FC<{
       {/* Tabs */}
       <div className="border-b border-fundo-borda">
         <div className="flex gap-4">
-          {[
-            { id: 'painel', label: 'Painel' },
-            { id: 'resumo', label: 'Detalhado' },
-            { id: 'regimes', label: 'Regimes' },
-            { id: 'transicao', label: 'Transição' },
-            { id: 'reforma', label: 'Reforma 2027-2033' },
-          ].map(tab => (
+          {(
+            [
+              { id: 'painel', label: 'Painel' },
+              { id: 'regimes', label: 'Regimes' },
+            ] as const
+          ).map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
@@ -750,24 +981,14 @@ const DashboardContent: React.FC<{
 
       {/* Tab Content */}
       <div>
-        {activeTab === 'painel' && (
+        {activeTab === 'painel' && parametros && (
           <div className="space-y-6">
-            <PainelExecutivo sessionId={sessionId} token={token} />
-            {/*
-              A conferência de preenchimento fica no fim do painel: é leitura
-              de apoio, feita depois de olhar os números, e não o primeiro
-              dado que alguém procura ao abrir o sistema.
-            */}
-            <CamposTributarios sessionId={sessionId} token={token} />
-          </div>
-        )}
+            <PainelExecutivo sessionId={sessionId} token={token} filtros={parametros} />
 
-        {activeTab === 'resumo' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Tributos */}
+            {/* Resumo: o conteúdo da antiga aba Detalhado. */}
             <Card>
               <div className="mb-1 flex items-center gap-2">
-                <h3 className="font-semibold text-lg">Distribuição de Tributos</h3>
+                <h3 className="font-semibold text-lg">Resumo</h3>
                 <AjudaIcone
                   largura={320}
                   conteudo={
@@ -782,7 +1003,7 @@ const DashboardContent: React.FC<{
                 />
               </div>
               <p className="mb-4 text-sm text-tinta-suave">
-                Total de {formatarMoeda(resumo.totalTributos)} em tributos destacados
+                Distribuição de tributos · total de {formatarMoeda(resumo.totalTributos)} em tributos destacados
               </p>
 
               {(() => {
@@ -807,7 +1028,7 @@ const DashboardContent: React.FC<{
                 if (tributos.length === 0) {
                   return (
                     <p className="py-12 text-center text-tinta-suave">
-                      Nenhum tributo destacado nas notas importadas.
+                      Nenhum tributo destacado nas notas filtradas.
                     </p>
                   );
                 }
@@ -885,6 +1106,12 @@ const DashboardContent: React.FC<{
               })()}
             </Card>
 
+            {/*
+              A conferência de preenchimento fica no fim do painel: é leitura
+              de apoio, feita depois de olhar os números, e não o primeiro
+              dado que alguém procura ao abrir o sistema.
+            */}
+            <CamposTributarios sessionId={sessionId} token={token} filtros={parametros} />
           </div>
         )}
 
@@ -992,62 +1219,10 @@ const DashboardContent: React.FC<{
           </Card>
         )}
 
-        {activeTab === 'transicao' && (
-          <Card>
-            <div className="mb-4 flex items-center gap-2">
-              <h3 className="text-lg font-semibold">Evolução Tributária (2024-2027)</h3>
-              <AjudaIcone
-                largura={330}
-                conteudo={
-                  <MemoriaCalculo
-                    titulo="Evolução Tributária"
-                    descricao="Recalcula os tributos das notas importadas com as alíquotas de cada ano da legislação cadastrada."
-                    linhas={[
-                      { rotulo: 'Base', valor: 'notas da sessão atual' },
-                      { rotulo: 'Alíquotas', valor: 'data/tax-rules.json' },
-                      { rotulo: 'Regime', valor: 'inferido nota a nota' },
-                    ]}
-                    origem="Os valores mudam quando a tabela de regras é atualizada."
-                  />
-                }
-              />
-            </div>
-            <ResponsiveContainer width="100%" height={400}>
-              <LineChart data={transicao?.dados || []}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="ano" />
-                <YAxis />
-                <Tooltip formatter={(value: any) => formatarMoeda(value)} />
-                <Legend />
-                <Line type="monotone" dataKey="icms" stroke="#8884d8" name="ICMS" />
-                <Line type="monotone" dataKey="iss" stroke="#82ca9d" name="ISS" />
-                <Line type="monotone" dataKey="cofins" stroke="#ffc658" name="COFINS" />
-              </LineChart>
-            </ResponsiveContainer>
-          </Card>
-        )}
-        {activeTab === 'reforma' && (
-          <AbaReforma sessionId={sessionId} token={token} />
-        )}
-
       </div>
 
       {/* Action Buttons */}
-      <div className="flex gap-4">
-        <button
-          onClick={onRefresh}
-          disabled={isLoading}
-          className="flex-1 rounded-lg bg-gradient-to-r from-marca-azul to-marca-roxo px-4 py-3 font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
-        >
-          Atualizar dashboard
-        </button>
-        <button
-          onClick={handleExportExcel}
-          className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-semibold"
-        >
-          <Download size={20} /> Exportar Excel
-        </button>
-      </div>
+      {botaoAtualizar}
     </div>
   );
 };
@@ -1056,16 +1231,11 @@ const DashboardContent: React.FC<{
 
 const App: React.FC = () => {
   const { state, setToken, setSessionId, setUser, logout } = useAppStore();
-  const [resumo, setResumo] = useState<ResumoGeral | null>(null);
-  const [regimes, setRegimes] = useState<RegimeDados[]>([]);
-  const [fornecedores, setFornecedores] = useState<FornecedorDados[]>([]);
-  const [transicao, setTransicao] = useState<any>(null);
+  // Muda a cada importação ou troca de empresa; o painel recarrega com ela.
+  const [versaoLote, setVersaoLote] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [appError, setAppError] = useState<string | null>(null);
-  const [pagina, setPagina] = useState<'painel' | 'admin' | 'config'>('painel');
-  // A configuração da reforma vive aqui porque agora é editável em dois
-  // lugares: no card de importação e na página de Configurações.
-  const [config, setConfig] = useState<TipoConfig>(CONFIGURACAO_PADRAO);
+  const [pagina, setPagina] = useState<'painel' | 'admin'>('painel');
 
   /**
    * Troca a sessão pela de outro usuário, a pedido do administrador.
@@ -1088,12 +1258,6 @@ const App: React.FC = () => {
     window.location.reload();
   };
 
-  useEffect(() => {
-    if (state.sessionId) {
-      refreshDashboard();
-    }
-  }, []);
-
   const handleLogin = async (email: string, password: string) => {
     setIsLoading(true);
     setAppError(null);
@@ -1114,48 +1278,12 @@ const App: React.FC = () => {
     }
   };
 
+  /**
+   * Avisa o painel de que o lote mudou. As buscas, todas com os filtros da
+   * análise, ficam no DashboardContent.
+   */
   const refreshDashboard = async () => {
-    if (!state.sessionId || !state.token) return;
-
-    setIsLoading(true);
-
-    try {
-      const [resumoRes, regimeRes, transicaoRes, fornecedorRes] = await Promise.all([
-        axios.get(`${API_URL}/api/v1/dashboard/resumo`, {
-          headers: {
-            'x-session-id': state.sessionId,
-            'Authorization': `Bearer ${state.token}`,
-          },
-        }),
-        axios.get(`${API_URL}/api/v1/dashboard/regimes`, {
-          headers: {
-            'x-session-id': state.sessionId,
-            'Authorization': `Bearer ${state.token}`,
-          },
-        }),
-        axios.get(`${API_URL}/api/v1/dashboard/transicao`, {
-          headers: {
-            'x-session-id': state.sessionId,
-            'Authorization': `Bearer ${state.token}`,
-          },
-        }),
-        axios.get(`${API_URL}/api/v1/dashboard/fornecedores`, {
-          headers: {
-            'x-session-id': state.sessionId,
-            'Authorization': `Bearer ${state.token}`,
-          },
-        }),
-      ]);
-
-      setResumo(resumoRes.data.data);
-      setRegimes(regimeRes.data.data || []);
-      setTransicao(transicaoRes.data.data);
-      setFornecedores(fornecedorRes.data.data || []);
-    } catch (error: any) {
-      setAppError('Erro ao carregar dashboard');
-    } finally {
-      setIsLoading(false);
-    }
+    setVersaoLote(v => v + 1);
   };
 
   if (!state.token) {
@@ -1172,8 +1300,8 @@ const App: React.FC = () => {
   }
 
   // ---------- Páginas fora do painel ----------
-  // Administração e Configurações deixam de ser abas e passam a ser páginas
-  // próprias, abertas pelo menu do nome. Sem banner e sem o card de
+  // A Administração deixou de ser aba e passou a ser página
+  // própria, aberta pelo menu do nome. Sem banner e sem o card de
   // importação, para não misturar gestão com análise.
   if (pagina !== 'painel') {
     const ehAdmin = state.user?.papel === 'administrador';
@@ -1191,7 +1319,7 @@ const App: React.FC = () => {
             Voltar ao painel
           </button>
           <p className="mb-5 text-xs text-tinta-suave">
-            {pagina === 'admin' ? 'Administração' : 'Configurações'}
+            Administração
           </p>
 
           {pagina === 'admin' &&
@@ -1208,17 +1336,6 @@ const App: React.FC = () => {
               </p>
             ))}
 
-          {pagina === 'config' && (
-            <div>
-              <h2 className="text-xl font-bold text-tinta-forte">Configurações</h2>
-              <p className="mb-4 text-sm text-tinta-suave">
-                Parâmetros aplicados às próximas importações
-              </p>
-              <div className="rounded-lg border border-fundo-borda bg-fundo-card p-5">
-                <ConfiguracoesImportacao valor={config} onChange={setConfig} />
-              </div>
-            </div>
-          )}
         </main>
       </div>
     );
@@ -1240,22 +1357,13 @@ const App: React.FC = () => {
           sessionId={state.sessionId!}
           token={state.token}
           onUploadSuccess={refreshDashboard}
-          config={config}
-          onConfigChange={setConfig}
         />
 
         <div className="mt-8">
           <DashboardContent
-            resumo={resumo}
-            regimes={regimes}
-            fornecedores={fornecedores}
-            transicao={transicao}
-            isLoading={isLoading}
+            versaoLote={versaoLote}
             sessionId={state.sessionId!}
             token={state.token}
-            onRefresh={refreshDashboard}
-            usuario={state.user}
-            onAssumirUsuario={assumirUsuario}
           />
         </div>
       </main>

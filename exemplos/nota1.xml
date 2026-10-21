@@ -15,7 +15,7 @@
       <CNPJ>99888777000166</CNPJ><xNome>CLIENTE DESTINO LTDA</xNome>
     </dest>
     <det nItem="1">
-      <prod><cProd>001</cProd><xProd>PRODUTO TESTE</xProd><qCom>1.0000</qCom><vProd>10000.00</vProd></prod>
+      <prod><cProd>001</cProd><xProd>PRODUTO TESTE</xProd><NCM>84713012</NCM><CFOP>5102</CFOP><qCom>1.0000</qCom><vProd>10000.00</vProd></prod>
     </det>
     <total>
       <ICMSTot>
