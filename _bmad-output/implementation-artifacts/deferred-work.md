@@ -16,3 +16,12 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-validador-v1-importacao-automatica.md`
   summary: Não há CI; os testes do backend só rodam quando alguém executa npm test à mão.
   evidence: .github/workflows não existe no repositório; anterior a este story.
+- source_spec: `_bmad-output/implementation-artifacts/spec-validador-v1-painel-e-filtros.md`
+  summary: Planilha exportada com filtros não registra Entrada/Saída, CFOP e NCM usados.
+  evidence: /export/excel filtra, mas o arquivo não traz metadados; cabe no relatório da entrega de conferência.
+- source_spec: `_bmad-output/implementation-artifacts/spec-validador-v1-painel-e-filtros.md`
+  summary: Atualizar AGENTS.md (refresh do bmad-project-context), COMO_RODAR.md e DEPLOY.md após remover reforma e transição e criar /dashboard/filtros.
+  evidence: AGENTS.md l. 32 cita /dashboard/transicao e /reforma/*; COMO_RODAR.md lista as rotas e abas removidas.
+- source_spec: `_bmad-output/implementation-artifacts/spec-validador-v1-painel-e-filtros.md`
+  summary: Decidir se backend/data/reforma-transicao.json sai do repositório.
+  evidence: único leitor (services/reforma.ts) foi removido; AGENTS.md proíbe editar à mão, exclusão exige confirmação do usuário.

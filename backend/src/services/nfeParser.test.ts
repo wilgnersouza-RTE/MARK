@@ -143,3 +143,51 @@ describe('parseNFE: autodetecção do modelo', () => {
     await expect(nfeParserService.parseNFE('<nfeProc><NFe>')).rejects.toThrow();
   });
 });
+
+describe('parseNFE: CFOP e NCM para os filtros', () => {
+  /** nota1 com os itens trocados pelos informados. */
+  function nfeComItens(itens: Array<{ cfop?: string; ncm?: string }>): string {
+    const det = itens
+      .map(
+        (item, i) =>
+          `<det nItem="${i + 1}"><prod><cProd>${i + 1}</cProd><xProd>ITEM</xProd>` +
+          (item.ncm ? `<NCM>${item.ncm}</NCM>` : '') +
+          (item.cfop ? `<CFOP>${item.cfop}</CFOP>` : '') +
+          '<vProd>10.00</vProd></prod></det>'
+      )
+      .join('');
+    return fs.readFileSync(NOTA1, 'utf-8').replace(/<det [\s\S]*<\/det>/, det);
+  }
+
+  it('guarda CFOPs e NCMs distintos dos itens da NF-e', async () => {
+    const doc = await nfeParserService.parseNFE(
+      nfeComItens([
+        { cfop: '5102', ncm: '84713012' },
+        { cfop: '5102', ncm: '85171231' },
+        { cfop: '5405', ncm: '84713012' },
+      ])
+    );
+
+    expect(doc.cfops).toEqual(['5102', '5405']);
+    expect(doc.ncms).toEqual(['84713012', '85171231']);
+  });
+
+  it('deixa as listas vazias quando os itens não trazem os códigos', async () => {
+    const doc = await nfeParserService.parseNFE(nfeComItens([{}]));
+    expect(doc.cfops).toEqual([]);
+    expect(doc.ncms).toEqual([]);
+  });
+
+  it('lê o CFOP da operação no CT-e, sem NCM', async () => {
+    const xml = CTE_CARGA.replace('<mod>57</mod>', '<CFOP>5353</CFOP><mod>57</mod>');
+    const doc = await nfeParserService.parseNFE(xml);
+    expect(doc.cfops).toEqual(['5353']);
+    expect(doc.ncms).toEqual([]);
+  });
+
+  it('deixa CFOP e NCM vazios na NFS-e', async () => {
+    const doc = await nfeParserService.parseNFE(NFSE);
+    expect(doc.cfops).toEqual([]);
+    expect(doc.ncms).toEqual([]);
+  });
+});

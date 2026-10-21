@@ -118,6 +118,13 @@ export interface NFeDocument {
   divergencias: Divergencia[];
   /** Conferência de preenchimento dos campos tributários da nota */
   camposTributarios?: CampoTributario[];
+  /**
+   * CFOPs distintos da nota: dos itens na NF-e e NFC-e, da operação no
+   * CT-e. Vazio na NFS-e, que não tem CFOP.
+   */
+  cfops: string[];
+  /** NCMs distintos dos itens. Só NF-e e NFC-e têm NCM; vazio nos demais. */
+  ncms: string[];
 }
 
 /**
@@ -183,7 +190,6 @@ export interface DashboardData {
   porRegime: RegimeDados[];
   porFornecedor: FornecedorDados[];
   divergencias: Divergencia[];
-  transicaoAnual: TransicaoAnual;
 }
 
 export interface ResumoGeral {
@@ -245,24 +251,6 @@ export interface FornecedorDados {
   conformidade: number;
 }
 
-export interface TransicaoAnual {
-  anos: number[];
-  tributos: {
-    icms: number[];
-    iss: number[];
-    pis: number[];
-    cofins: number[];
-    irrf: number[];
-  };
-  projecoes: {
-    icms: number[];
-    iss: number[];
-    pis: number[];
-    cofins: number[];
-    irrf: number[];
-  };
-}
-
 // ==================== Upload e Processamento ====================
 export interface ImportacaoArquivo {
   sessionId: string;
@@ -299,7 +287,6 @@ export interface ExcelExportOptions {
   incluirGraficos: boolean;
   incluirValidacoes: boolean;
   incluirDivergencias: boolean;
-  incluirTransicao: boolean;
   idioma: 'pt-BR' | 'en-US';
 }
 

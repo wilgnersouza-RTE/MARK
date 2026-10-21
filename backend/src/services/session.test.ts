@@ -26,6 +26,8 @@ function nota(cnpjEmitente: string, cnpjDestino: string): NFeDocument {
     },
     validacoes: [],
     divergencias: [],
+    cfops: [],
+    ncms: [],
   };
 }
 

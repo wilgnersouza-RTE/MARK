@@ -19,7 +19,6 @@ export class ExcelExportService {
     this.addDocumentosAba(workbook, documentos, temEmpresa);
     this.addPorRegimeAba(workbook, dashboard.porRegime);
     this.addPorFornecedorAba(workbook, dashboard.porFornecedor);
-    this.addTransicaoAba(workbook, dashboard.transicaoAnual);
 
     // Gerar buffer
     const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
@@ -167,38 +166,6 @@ export class ExcelExportService {
     const worksheet = XLSX.utils.aoa_to_sheet(data);
     worksheet['!cols'] = [{ wch: 25 }, { wch: 18 }, { wch: 15 }, { wch: 12 }, { wch: 15 }, { wch: 15 }];
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Fornecedores');
-  }
-
-  /**
-   * Adiciona aba de transição anual
-   */
-  private addTransicaoAba(workbook: XLSX.WorkBook, transicaoAnual: any): void {
-    const data = [
-      ['TRANSIÇÃO TRIBUTÁRIA 2024-2027'],
-      [],
-      ['Tributo', '2024', '2025', '2026', '2027', 'Variação'],
-    ];
-
-    const tributos = ['icms', 'iss', 'pis', 'cofins', 'irrf'];
-
-    for (const tributo of tributos) {
-      const valores = transicaoAnual.tributos[tributo];
-      const projecoes = transicaoAnual.projecoes[tributo];
-      const variacao = projecoes[3] - valores[0]; // 2027 - 2024
-
-      data.push([
-        tributo.toUpperCase(),
-        `R$ ${valores[0].toFixed(2)}`,
-        `R$ ${valores[1].toFixed(2)}`,
-        `R$ ${valores[2].toFixed(2)}`,
-        `R$ ${valores[3].toFixed(2)}`,
-        `R$ ${variacao.toFixed(2)}`,
-      ]);
-    }
-
-    const worksheet = XLSX.utils.aoa_to_sheet(data);
-    worksheet['!cols'] = [{ wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }];
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Transição 2024-2027');
   }
 }
 

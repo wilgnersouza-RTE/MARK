@@ -36,6 +36,8 @@ function nota(
     },
     validacoes: [],
     divergencias: [],
+    cfops: [],
+    ncms: [],
     ...extras,
   };
 }

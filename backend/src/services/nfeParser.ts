@@ -8,7 +8,6 @@ import {
 } from './camposTributarios';
 import { v4 as uuidv4 } from 'uuid';
 import { taxRulesService } from './taxRules';
-import { reformaService } from './reforma';
 
 /** Motivo único de recusa para XML que não é nenhum dos documentos aceitos. */
 export const ERRO_ESTRUTURA_DESCONHECIDA =
@@ -175,6 +174,7 @@ export class NFEParserService {
       // Conferência de preenchimento: percorre os itens, onde vivem o CST e
       // o grupo de IBS/CBS.
       const camposTributarios = conferirCamposNFe(this.lerItens(nfe));
+      const { cfops, ncms } = this.lerCodigosDosItens(nfe);
 
       const documento: NFeDocument = {
         id: uuidv4(),
@@ -213,6 +213,8 @@ export class NFEParserService {
         validacoes,
         divergencias,
         camposTributarios,
+        cfops,
+        ncms,
       };
 
       return documento;
@@ -478,6 +480,9 @@ export class NFEParserService {
       validacoes,
       divergencias,
       camposTributarios,
+      // NFS-e não tem CFOP nem NCM.
+      cfops: [],
+      ncms: [],
     };
   }
 
@@ -499,6 +504,26 @@ export class NFEParserService {
     return 'Lucro-Presumido';
   }
 
+
+  /**
+   * CFOPs e NCMs distintos dos itens (det/prod) da NF-e e NFC-e, base dos
+   * filtros da análise. Uma nota entra no filtro se qualquer item tiver o
+   * código.
+   */
+  private lerCodigosDosItens(nfe: any): { cfops: string[]; ncms: string[] } {
+    const brutos = nfe.det;
+    const lista = !brutos ? [] : Array.isArray(brutos) ? brutos : [brutos];
+    const prods = lista.map((det: any) => this.no(det?.prod) || {});
+    return {
+      cfops: this.unicos(prods.map((p: any) => this.texto(p.CFOP))),
+      ncms: this.unicos(prods.map((p: any) => this.texto(p.NCM))),
+    };
+  }
+
+  /** Remove vazios e repetidos, mantendo a ordem de aparição. */
+  private unicos(codigos: string[]): string[] {
+    return Array.from(new Set(codigos.filter(Boolean)));
+  }
 
   /**
    * Percorre os itens da nota para conferir os campos tributários.
@@ -697,6 +722,9 @@ export class NFEParserService {
       validacoes,
       divergencias: [],
       camposTributarios,
+      // O CT-e declara um CFOP só, o da operação, e não tem NCM.
+      cfops: this.unicos([this.texto(ide.CFOP)]),
+      ncms: [],
     };
   }
 

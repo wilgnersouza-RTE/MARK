@@ -8,12 +8,14 @@ import { authenticate } from '../middleware/auth';
 import { sessionService } from '../services/session';
 import { excelExportService } from '../services/export';
 import { dashboardService } from '../services/dashboard';
+import { filtrarDocumentos, lerFiltros } from '../utils/filtros';
 
 const router = Router();
 
 /**
  * GET /api/v1/export/excel
- * Exportar análise completa em arquivo Excel
+ * Exportar a análise em Excel. Aceita os mesmos filtros do dashboard
+ * (?sentido=&cfop=&ncm=), para a planilha sair com o recorte da tela.
  */
 router.get('/excel', authenticate, async (req: Request, res: Response) => {
   try {
@@ -27,12 +29,22 @@ router.get('/excel', authenticate, async (req: Request, res: Response) => {
       });
     }
 
-    const documentos = sessionService.obterDocumentos(sessionId);
+    const doLote = sessionService.obterDocumentos(sessionId);
 
-    if (!documentos || documentos.length === 0) {
+    if (!doLote || doLote.length === 0) {
       return res.status(400).json({
         success: false,
         error: 'Nenhum documento para exportar',
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    const documentos = filtrarDocumentos(doLote, lerFiltros(req.query));
+
+    if (documentos.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Nenhuma nota com os filtros escolhidos',
         timestamp: new Date().toISOString(),
       });
     }

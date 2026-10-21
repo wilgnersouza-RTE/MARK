@@ -5,9 +5,7 @@ import {
   CategoriaDados,
   RegimeDados,
   FornecedorDados,
-  TransicaoAnual,
 } from '../types';
-import { taxRulesService } from './taxRules';
 
 export class DashboardService {
   /**
@@ -23,7 +21,6 @@ export class DashboardService {
     const porRegime = await this.calcularPorRegime(documentos);
     const porFornecedor = this.calcularPorFornecedor(documentos);
     const divergencias = this.extrairDivergencias(documentos);
-    const transicaoAnual = await this.calcularTransicaoAnual(documentos);
 
     return {
       resumoGeral,
@@ -31,7 +28,6 @@ export class DashboardService {
       porRegime,
       porFornecedor,
       divergencias,
-      transicaoAnual,
     };
   }
 
@@ -277,67 +273,6 @@ export class DashboardService {
   }
 
   /**
-   * Calcula transição anual (2024-2027)
-   */
-  private async calcularTransicaoAnual(documentos: NFeDocument[]): Promise<TransicaoAnual> {
-    const anos = [2024, 2025, 2026, 2027];
-    const tributos = {
-      icms: Array(anos.length).fill(0),
-      iss: Array(anos.length).fill(0),
-      pis: Array(anos.length).fill(0),
-      cofins: Array(anos.length).fill(0),
-      irrf: Array(anos.length).fill(0),
-    };
-
-    const projecoes = {
-      icms: Array(anos.length).fill(0),
-      iss: Array(anos.length).fill(0),
-      pis: Array(anos.length).fill(0),
-      cofins: Array(anos.length).fill(0),
-      irrf: Array(anos.length).fill(0),
-    };
-
-    // Agregar dados por ano
-    for (const doc of documentos) {
-      const anoIndex = anos.indexOf(new Date(doc.dataEmissao).getFullYear());
-
-      if (anoIndex !== -1) {
-        tributos.icms[anoIndex] += doc.values.icms;
-        tributos.iss[anoIndex] += doc.values.iss;
-        tributos.pis[anoIndex] += doc.values.pis;
-        tributos.cofins[anoIndex] += doc.values.cofins;
-        tributos.irrf[anoIndex] += doc.values.irrf;
-      }
-    }
-
-    // Carregar projeções da reforma
-    for (let i = 0; i < anos.length; i++) {
-      const regras = await taxRulesService.getRegrasPorAno(anos[i]);
-
-      if (regras) {
-        const baseCalculoMedio = documentos.length > 0 ? documentos.reduce((acc, doc) => acc + doc.values.baseCalculo, 0) / documentos.length : 0;
-        const lucroRealIcms = Number(regras.icms['lucro-real'] ?? regras.icms.LucroReal ?? 0);
-        const lucroRealIss = Number(regras.iss['lucro-real'] ?? regras.iss.LucroReal ?? 0);
-        const lucroRealPis = Number(regras.pis['lucro-real'] ?? regras.pis.LucroReal ?? 0);
-        const lucroRealCofins = Number(regras.cofins['lucro-real'] ?? regras.cofins.LucroReal ?? 0);
-        const lucroRealIrrf = Number(regras.irrf['lucro-real'] ?? regras.irrf.LucroReal ?? 0);
-
-        projecoes.icms[i] = (baseCalculoMedio * lucroRealIcms) / 100;
-        projecoes.iss[i] = lucroRealIss;
-        projecoes.pis[i] = (baseCalculoMedio * lucroRealPis) / 100;
-        projecoes.cofins[i] = (baseCalculoMedio * lucroRealCofins) / 100;
-        projecoes.irrf[i] = lucroRealIrrf;
-      }
-    }
-
-    return {
-      anos,
-      tributos,
-      projecoes,
-    };
-  }
-
-  /**
    * Dashboard vazio
    */
   private emptyDashboard(): DashboardData {
@@ -363,23 +298,6 @@ export class DashboardService {
       porRegime: [],
       porFornecedor: [],
       divergencias: [],
-      transicaoAnual: {
-        anos: [2024, 2025, 2026, 2027],
-        tributos: {
-          icms: [0, 0, 0, 0],
-          iss: [0, 0, 0, 0],
-          pis: [0, 0, 0, 0],
-          cofins: [0, 0, 0, 0],
-          irrf: [0, 0, 0, 0],
-        },
-        projecoes: {
-          icms: [0, 0, 0, 0],
-          iss: [0, 0, 0, 0],
-          pis: [0, 0, 0, 0],
-          cofins: [0, 0, 0, 0],
-          irrf: [0, 0, 0, 0],
-        },
-      },
     };
   }
 }

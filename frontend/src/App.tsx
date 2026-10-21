@@ -1,28 +1,28 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import axios from 'axios';
 import {
-  BarChart, Bar, LineChart, Line, Cell, LabelList,
+  BarChart, Bar, Cell, LabelList,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
 import {
-  Upload, Download, LogOut, FileText, TrendingUp, AlertTriangle,
-  CheckCircle, XCircle, Calendar, Building2, DollarSign, Settings, Shield,
+  Upload, LogOut, FileText, TrendingUp, AlertTriangle,
+  CheckCircle, XCircle, Calendar, Building2, DollarSign, Shield,
   ChevronDown, Users, ArrowLeft, FileSpreadsheet
 } from 'lucide-react';
 
 import { MarcaRTE } from './components/Marca';
 import { Tooltip as DicaHover, AjudaIcone, MemoriaCalculo } from './components/Tooltip';
-import { AbaReforma } from './components/AbaReforma';
 import { CamposTributarios } from './components/CamposTributarios';
 import { AbaAdministracao } from './components/AbaAdministracao';
 import { TelaLogin } from './components/TelaLogin';
 import { PainelExecutivo } from './components/PainelExecutivo';
 import { API_URL } from './utils/api';
 import {
-  ConfiguracoesImportacao,
-  CONFIGURACAO_PADRAO,
-  type ConfiguracaoImportacao as TipoConfig,
-} from './components/ConfiguracoesImportacao';
+  FiltrosAnalise,
+  paraParametros,
+  type EstadoFiltros,
+  type OpcoesFiltros,
+} from './components/FiltrosAnalise';
 import {
   formatarMoeda, formatarMoedaCompacta, formatarInteiro,
   formatarPercentual, formatarCNPJ,
@@ -79,16 +79,6 @@ interface RegimeDados {
     cofins: number;
     irrf: number;
   };
-}
-
-interface FornecedorDados {
-  cnpj: string;
-  nome: string;
-  regime: string;
-  quantidade: number;
-  valor: number;
-  tributos: number;
-  conformidade: number;
 }
 
 // ==================== STORE ====================
@@ -159,8 +149,8 @@ const useAppStore = () => {
 const Header: React.FC<{
   user: any;
   onLogout: () => void;
-  /** Navegação para as páginas fora do painel (administração, configurações). */
-  onIrPara: (pagina: 'admin' | 'config') => void;
+  /** Navegação para as páginas fora do painel (administração). */
+  onIrPara: (pagina: 'admin') => void;
 }> = ({ user, onLogout, onIrPara }) => {
   const [menuAberto, setMenuAberto] = useState(false);
 
@@ -262,17 +252,6 @@ const Header: React.FC<{
                   )}
                   <button
                     role="menuitem"
-                    onClick={() => {
-                      setMenuAberto(false);
-                      onIrPara('config');
-                    }}
-                    className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-sm text-tinta-forte transition hover:bg-fundo-eleva"
-                  >
-                    <Settings size={16} className="text-tinta-suave" />
-                    Configurações
-                  </button>
-                  <button
-                    role="menuitem"
                     onClick={onLogout}
                     className="flex w-full items-center gap-2.5 border-t border-fundo-borda px-3.5 py-2.5 text-sm text-red-600 transition hover:bg-red-50"
                   >
@@ -351,9 +330,7 @@ const UploadSection: React.FC<{
   sessionId: string;
   token: string;
   onUploadSuccess: () => Promise<void>;
-  config: TipoConfig;
-  onConfigChange: (c: TipoConfig) => void;
-}> = ({ sessionId, token, onUploadSuccess, config, onConfigChange }) => {
+}> = ({ sessionId, token, onUploadSuccess }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   // Arquivos do ZIP que não puderam ser lidos, com o motivo.
@@ -361,7 +338,6 @@ const UploadSection: React.FC<{
   const [baixandoErros, setBaixandoErros] = useState(false);
   // Quantos documentos da importação anterior foram descartados.
   const [substituidos, setSubstituidos] = useState(0);
-  const [mostrarConfig, setMostrarConfig] = useState(false);
   // Resumo do lote vigente: modelos, sentidos e empresa analisada.
   const [lote, setLote] = useState<ResumoLote | null>(null);
   const [arrastando, setArrastando] = useState(false);
@@ -445,8 +421,6 @@ const UploadSection: React.FC<{
     try {
       const formData = new FormData();
       formData.append('file', file);
-      // Configurações da Reforma Tributária vão junto e ficam registradas na importação
-      formData.append('configuracao', JSON.stringify(config));
 
       const response = await axios.post(`${API_URL}/api/v1/upload/nfe`, formData, {
         headers: {
@@ -691,64 +665,125 @@ const UploadSection: React.FC<{
           Máximo 50MB • ZIP contendo XMLs • cada importação substitui a anterior
         </p>
 
-        {/* Configurações da Reforma Tributária do Consumo (IT 2025.002) */}
-        <div className="mt-6 border-t border-fundo-borda border-marca-azul/30 pt-4">
-          <button
-            type="button"
-            onClick={() => setMostrarConfig(v => !v)}
-            className="mx-auto flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-marca-azul transition hover:bg-marca-azul/10"
-          >
-            <Settings size={16} />
-            Configurações da Reforma Tributária
-            <span className="text-xs font-normal text-tinta-suave">
-              {mostrarConfig ? '(ocultar)' : '(CST, cClassTrib e demais campos)'}
-            </span>
-          </button>
-        </div>
       </div>
-
-      {mostrarConfig && (
-        <div className="mt-4 rounded-lg border border-marca-azul/30 bg-fundo-card p-4 text-left">
-          <ConfiguracoesImportacao valor={config} onChange={onConfigChange} />
-        </div>
-      )}
     </Card>
   );
 };
 
 // Dashboard Content
+/**
+ * Painel do lote, com a barra de filtros comum a todas as abas.
+ *
+ * O estado dos filtros vive aqui e vai em todas as buscas: indicadores do
+ * topo, Painel (com o bloco Resumo e a conferência de campos), Regimes e
+ * Exportar. Trocar de aba não mexe na seleção.
+ */
 const DashboardContent: React.FC<{
-  resumo: ResumoGeral | null;
-  regimes: RegimeDados[];
-  fornecedores: FornecedorDados[];
-  transicao: any;
-  isLoading: boolean;
+  /** Muda a cada importação ou troca de empresa: recarrega opções e filtros */
+  versaoLote: number;
   sessionId: string;
   token: string;
-  onRefresh: () => Promise<void>;
-  usuario: any;
-  onAssumirUsuario: (dados: any) => void;
-}> = ({
-  resumo,
-  regimes,
-  fornecedores,
-  transicao,
-  isLoading,
-  sessionId,
-  token,
-  onRefresh,
-  usuario,
-  onAssumirUsuario,
-}) => {
-  const [activeTab, setActiveTab] = useState('painel');
+}> = ({ versaoLote, sessionId, token }) => {
+  const [activeTab, setActiveTab] = useState<'painel' | 'regimes'>('painel');
+  const [opcoes, setOpcoes] = useState<OpcoesFiltros | null>(null);
+  const [filtros, setFiltros] = useState<EstadoFiltros | null>(null);
+  const [resumo, setResumo] = useState<ResumoGeral | null>(null);
+  const [regimes, setRegimes] = useState<RegimeDados[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  const [retraido, setRetraido] = useState(false);
+  const [exportando, setExportando] = useState(false);
+  // "Atualizar dashboard" incrementa: refaz /filtros mantendo a seleção.
+  const [recarga, setRecarga] = useState(0);
+  const ultimaVersao = useRef<number | null>(null);
+
+  const cabecalhos = { 'x-session-id': sessionId, Authorization: `Bearer ${token}` };
+
+  // Objeto estável por seleção: os filhos refazem a busca só quando ele muda.
+  const parametros = useMemo(() => (filtros ? paraParametros(filtros) : null), [filtros]);
+
+  // Busca as opções. Lote novo abre os filtros no padrão que o servidor
+  // indica; numa recarga a seleção atual é mantida (objeto novo, para todas
+  // as buscas serem refeitas).
+  useEffect(() => {
+    let ativo = true;
+    setErro(null);
+    axios
+      .get(`${API_URL}/api/v1/dashboard/filtros`, { headers: cabecalhos })
+      .then(r => {
+        if (!ativo) return;
+        const dados: OpcoesFiltros = r.data.data;
+        const padrao: EstadoFiltros = { sentido: dados.sentidoPadrao, cfop: '', ncm: '' };
+        const loteNovo = ultimaVersao.current !== versaoLote;
+        ultimaVersao.current = versaoLote;
+        setOpcoes(dados);
+        setFiltros(f => (loteNovo || !f ? padrao : { ...f }));
+      })
+      .catch(() => {
+        if (!ativo) return;
+        // Opções velhas não podem seguir valendo para um lote que não se conhece.
+        setOpcoes(null);
+        setFiltros(null);
+        setResumo(null);
+        setErro('Não foi possível carregar os filtros da análise.');
+      });
+    return () => {
+      ativo = false;
+    };
+  }, [versaoLote, recarga, sessionId, token]);
+
+  // Indicadores do topo e aba Regimes, sempre com o recorte escolhido.
+  useEffect(() => {
+    if (!parametros) return;
+    let ativo = true;
+    setIsLoading(true);
+    setErro(null);
+
+    Promise.all([
+      axios.get(`${API_URL}/api/v1/dashboard/resumo`, { headers: cabecalhos, params: parametros }),
+      axios.get(`${API_URL}/api/v1/dashboard/regimes`, { headers: cabecalhos, params: parametros }),
+    ])
+      .then(([resumoRes, regimeRes]) => {
+        if (!ativo) return;
+        setResumo(resumoRes.data.data);
+        setRegimes(regimeRes.data.data || []);
+      })
+      .catch(() => {
+        if (ativo) setErro('Erro ao carregar dashboard');
+      })
+      .finally(() => {
+        if (ativo) setIsLoading(false);
+      });
+
+    return () => {
+      ativo = false;
+    };
+  }, [parametros, sessionId, token]);
+
+  // Refaz /filtros e, com ele, todas as buscas, sem perder a seleção.
+  const onRefresh = () => {
+    setErro(null);
+    setRecarga(n => n + 1);
+  };
+
+  const botaoAtualizar = (
+    <div className="flex gap-4">
+      <button
+        onClick={onRefresh}
+        disabled={isLoading}
+        className="flex-1 rounded-lg bg-gradient-to-r from-marca-azul to-marca-roxo px-4 py-3 font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+      >
+        Atualizar dashboard
+      </button>
+    </div>
+  );
 
   const handleExportExcel = async () => {
+    setExportando(true);
     try {
       const response = await axios.get(`${API_URL}/api/v1/export/excel`, {
-        headers: {
-          'x-session-id': sessionId,
-          'Authorization': `Bearer ${token}`,
-        },
+        headers: cabecalhos,
+        params: parametros ?? {},
         responseType: 'blob',
       });
 
@@ -759,12 +794,38 @@ const DashboardContent: React.FC<{
       document.body.appendChild(link);
       link.click();
       link.parentNode?.removeChild(link);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao exportar:', error);
+      // Com responseType 'blob', o corpo de erro também chega como Blob.
+      let mensagem = 'Não foi possível exportar a planilha.';
+      try {
+        const texto = await error.response?.data?.text?.();
+        const corpo = texto ? JSON.parse(texto) : null;
+        if (corpo?.error) mensagem = corpo.error;
+      } catch {
+        // corpo ilegível: fica a mensagem genérica
+      }
+      setErro(mensagem);
+    } finally {
+      setExportando(false);
     }
   };
 
-  if (!resumo) {
+  const bannerErro = erro && (
+    <div className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-700">{erro}</div>
+  );
+
+  if (!opcoes || !filtros) {
+    // Sem opções só se chega por erro (ou antes da primeira resposta).
+    return erro ? (
+      <div className="space-y-6">
+        {bannerErro}
+        {botaoAtualizar}
+      </div>
+    ) : null;
+  }
+
+  if (opcoes.totalDocumentos === 0) {
     return (
       <div className="text-center py-12">
         <FileText size={48} className="mx-auto text-tinta-suave mb-4" />
@@ -773,8 +834,45 @@ const DashboardContent: React.FC<{
     );
   }
 
+  const cartaoFiltros = (
+    <FiltrosAnalise
+      filtros={filtros}
+      opcoes={opcoes}
+      onChange={setFiltros}
+      onExportar={handleExportExcel}
+      exportando={exportando}
+      retraido={retraido}
+      onAlternarRetraido={() => setRetraido(v => !v)}
+    />
+  );
+
+  // Lote com notas, mas indicadores ainda não carregados (ou com falha):
+  // o cartão e o botão de atualizar continuam à mão.
+  if (!resumo) {
+    return (
+      <div className="space-y-6">
+        {cartaoFiltros}
+        {bannerErro}
+        {botaoAtualizar}
+      </div>
+    );
+  }
+
+  const recorteVazio = resumo.totalDocumentos === 0;
+
   return (
     <div className="space-y-6">
+      {cartaoFiltros}
+
+      {bannerErro}
+
+      {recorteVazio && (
+        <div className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800">
+          <AlertTriangle size={16} className="shrink-0" />
+          Nenhuma nota com os filtros escolhidos
+        </div>
+      )}
+
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
@@ -785,7 +883,7 @@ const DashboardContent: React.FC<{
           memoria={
             <MemoriaCalculo
               titulo="Total de Documentos"
-              descricao="Contagem de XMLs de NF-e processados com sucesso nesta sessão."
+              descricao="Contagem de XMLs processados com sucesso nesta sessão, dentro dos filtros escolhidos."
               linhas={[]}
               resultado={{ rotulo: 'Total', valor: formatarInteiro(resumo.totalDocumentos) }}
               origem="XMLs que falharam na leitura não entram nesta contagem — eles são listados no retorno da importação."
@@ -860,13 +958,12 @@ const DashboardContent: React.FC<{
       {/* Tabs */}
       <div className="border-b border-fundo-borda">
         <div className="flex gap-4">
-          {[
-            { id: 'painel', label: 'Painel' },
-            { id: 'resumo', label: 'Detalhado' },
-            { id: 'regimes', label: 'Regimes' },
-            { id: 'transicao', label: 'Transição' },
-            { id: 'reforma', label: 'Reforma 2027-2033' },
-          ].map(tab => (
+          {(
+            [
+              { id: 'painel', label: 'Painel' },
+              { id: 'regimes', label: 'Regimes' },
+            ] as const
+          ).map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
@@ -884,24 +981,14 @@ const DashboardContent: React.FC<{
 
       {/* Tab Content */}
       <div>
-        {activeTab === 'painel' && (
+        {activeTab === 'painel' && parametros && (
           <div className="space-y-6">
-            <PainelExecutivo sessionId={sessionId} token={token} />
-            {/*
-              A conferência de preenchimento fica no fim do painel: é leitura
-              de apoio, feita depois de olhar os números, e não o primeiro
-              dado que alguém procura ao abrir o sistema.
-            */}
-            <CamposTributarios sessionId={sessionId} token={token} />
-          </div>
-        )}
+            <PainelExecutivo sessionId={sessionId} token={token} filtros={parametros} />
 
-        {activeTab === 'resumo' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Tributos */}
+            {/* Resumo: o conteúdo da antiga aba Detalhado. */}
             <Card>
               <div className="mb-1 flex items-center gap-2">
-                <h3 className="font-semibold text-lg">Distribuição de Tributos</h3>
+                <h3 className="font-semibold text-lg">Resumo</h3>
                 <AjudaIcone
                   largura={320}
                   conteudo={
@@ -916,7 +1003,7 @@ const DashboardContent: React.FC<{
                 />
               </div>
               <p className="mb-4 text-sm text-tinta-suave">
-                Total de {formatarMoeda(resumo.totalTributos)} em tributos destacados
+                Distribuição de tributos · total de {formatarMoeda(resumo.totalTributos)} em tributos destacados
               </p>
 
               {(() => {
@@ -941,7 +1028,7 @@ const DashboardContent: React.FC<{
                 if (tributos.length === 0) {
                   return (
                     <p className="py-12 text-center text-tinta-suave">
-                      Nenhum tributo destacado nas notas importadas.
+                      Nenhum tributo destacado nas notas filtradas.
                     </p>
                   );
                 }
@@ -1019,6 +1106,12 @@ const DashboardContent: React.FC<{
               })()}
             </Card>
 
+            {/*
+              A conferência de preenchimento fica no fim do painel: é leitura
+              de apoio, feita depois de olhar os números, e não o primeiro
+              dado que alguém procura ao abrir o sistema.
+            */}
+            <CamposTributarios sessionId={sessionId} token={token} filtros={parametros} />
           </div>
         )}
 
@@ -1126,62 +1219,10 @@ const DashboardContent: React.FC<{
           </Card>
         )}
 
-        {activeTab === 'transicao' && (
-          <Card>
-            <div className="mb-4 flex items-center gap-2">
-              <h3 className="text-lg font-semibold">Evolução Tributária (2024-2027)</h3>
-              <AjudaIcone
-                largura={330}
-                conteudo={
-                  <MemoriaCalculo
-                    titulo="Evolução Tributária"
-                    descricao="Recalcula os tributos das notas importadas com as alíquotas de cada ano da legislação cadastrada."
-                    linhas={[
-                      { rotulo: 'Base', valor: 'notas da sessão atual' },
-                      { rotulo: 'Alíquotas', valor: 'data/tax-rules.json' },
-                      { rotulo: 'Regime', valor: 'inferido nota a nota' },
-                    ]}
-                    origem="Os valores mudam quando a tabela de regras é atualizada."
-                  />
-                }
-              />
-            </div>
-            <ResponsiveContainer width="100%" height={400}>
-              <LineChart data={transicao?.dados || []}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="ano" />
-                <YAxis />
-                <Tooltip formatter={(value: any) => formatarMoeda(value)} />
-                <Legend />
-                <Line type="monotone" dataKey="icms" stroke="#8884d8" name="ICMS" />
-                <Line type="monotone" dataKey="iss" stroke="#82ca9d" name="ISS" />
-                <Line type="monotone" dataKey="cofins" stroke="#ffc658" name="COFINS" />
-              </LineChart>
-            </ResponsiveContainer>
-          </Card>
-        )}
-        {activeTab === 'reforma' && (
-          <AbaReforma sessionId={sessionId} token={token} />
-        )}
-
       </div>
 
       {/* Action Buttons */}
-      <div className="flex gap-4">
-        <button
-          onClick={onRefresh}
-          disabled={isLoading}
-          className="flex-1 rounded-lg bg-gradient-to-r from-marca-azul to-marca-roxo px-4 py-3 font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
-        >
-          Atualizar dashboard
-        </button>
-        <button
-          onClick={handleExportExcel}
-          className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-semibold"
-        >
-          <Download size={20} /> Exportar Excel
-        </button>
-      </div>
+      {botaoAtualizar}
     </div>
   );
 };
@@ -1190,16 +1231,11 @@ const DashboardContent: React.FC<{
 
 const App: React.FC = () => {
   const { state, setToken, setSessionId, setUser, logout } = useAppStore();
-  const [resumo, setResumo] = useState<ResumoGeral | null>(null);
-  const [regimes, setRegimes] = useState<RegimeDados[]>([]);
-  const [fornecedores, setFornecedores] = useState<FornecedorDados[]>([]);
-  const [transicao, setTransicao] = useState<any>(null);
+  // Muda a cada importação ou troca de empresa; o painel recarrega com ela.
+  const [versaoLote, setVersaoLote] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [appError, setAppError] = useState<string | null>(null);
-  const [pagina, setPagina] = useState<'painel' | 'admin' | 'config'>('painel');
-  // A configuração da reforma vive aqui porque agora é editável em dois
-  // lugares: no card de importação e na página de Configurações.
-  const [config, setConfig] = useState<TipoConfig>(CONFIGURACAO_PADRAO);
+  const [pagina, setPagina] = useState<'painel' | 'admin'>('painel');
 
   /**
    * Troca a sessão pela de outro usuário, a pedido do administrador.
@@ -1222,12 +1258,6 @@ const App: React.FC = () => {
     window.location.reload();
   };
 
-  useEffect(() => {
-    if (state.sessionId) {
-      refreshDashboard();
-    }
-  }, []);
-
   const handleLogin = async (email: string, password: string) => {
     setIsLoading(true);
     setAppError(null);
@@ -1248,48 +1278,12 @@ const App: React.FC = () => {
     }
   };
 
+  /**
+   * Avisa o painel de que o lote mudou. As buscas, todas com os filtros da
+   * análise, ficam no DashboardContent.
+   */
   const refreshDashboard = async () => {
-    if (!state.sessionId || !state.token) return;
-
-    setIsLoading(true);
-
-    try {
-      const [resumoRes, regimeRes, transicaoRes, fornecedorRes] = await Promise.all([
-        axios.get(`${API_URL}/api/v1/dashboard/resumo`, {
-          headers: {
-            'x-session-id': state.sessionId,
-            'Authorization': `Bearer ${state.token}`,
-          },
-        }),
-        axios.get(`${API_URL}/api/v1/dashboard/regimes`, {
-          headers: {
-            'x-session-id': state.sessionId,
-            'Authorization': `Bearer ${state.token}`,
-          },
-        }),
-        axios.get(`${API_URL}/api/v1/dashboard/transicao`, {
-          headers: {
-            'x-session-id': state.sessionId,
-            'Authorization': `Bearer ${state.token}`,
-          },
-        }),
-        axios.get(`${API_URL}/api/v1/dashboard/fornecedores`, {
-          headers: {
-            'x-session-id': state.sessionId,
-            'Authorization': `Bearer ${state.token}`,
-          },
-        }),
-      ]);
-
-      setResumo(resumoRes.data.data);
-      setRegimes(regimeRes.data.data || []);
-      setTransicao(transicaoRes.data.data);
-      setFornecedores(fornecedorRes.data.data || []);
-    } catch (error: any) {
-      setAppError('Erro ao carregar dashboard');
-    } finally {
-      setIsLoading(false);
-    }
+    setVersaoLote(v => v + 1);
   };
 
   if (!state.token) {
@@ -1306,8 +1300,8 @@ const App: React.FC = () => {
   }
 
   // ---------- Páginas fora do painel ----------
-  // Administração e Configurações deixam de ser abas e passam a ser páginas
-  // próprias, abertas pelo menu do nome. Sem banner e sem o card de
+  // A Administração deixou de ser aba e passou a ser página
+  // própria, aberta pelo menu do nome. Sem banner e sem o card de
   // importação, para não misturar gestão com análise.
   if (pagina !== 'painel') {
     const ehAdmin = state.user?.papel === 'administrador';
@@ -1325,7 +1319,7 @@ const App: React.FC = () => {
             Voltar ao painel
           </button>
           <p className="mb-5 text-xs text-tinta-suave">
-            {pagina === 'admin' ? 'Administração' : 'Configurações'}
+            Administração
           </p>
 
           {pagina === 'admin' &&
@@ -1342,17 +1336,6 @@ const App: React.FC = () => {
               </p>
             ))}
 
-          {pagina === 'config' && (
-            <div>
-              <h2 className="text-xl font-bold text-tinta-forte">Configurações</h2>
-              <p className="mb-4 text-sm text-tinta-suave">
-                Parâmetros aplicados às próximas importações
-              </p>
-              <div className="rounded-lg border border-fundo-borda bg-fundo-card p-5">
-                <ConfiguracoesImportacao valor={config} onChange={setConfig} />
-              </div>
-            </div>
-          )}
         </main>
       </div>
     );
@@ -1374,22 +1357,13 @@ const App: React.FC = () => {
           sessionId={state.sessionId!}
           token={state.token}
           onUploadSuccess={refreshDashboard}
-          config={config}
-          onConfigChange={setConfig}
         />
 
         <div className="mt-8">
           <DashboardContent
-            resumo={resumo}
-            regimes={regimes}
-            fornecedores={fornecedores}
-            transicao={transicao}
-            isLoading={isLoading}
+            versaoLote={versaoLote}
             sessionId={state.sessionId!}
             token={state.token}
-            onRefresh={refreshDashboard}
-            usuario={state.user}
-            onAssumirUsuario={assumirUsuario}
           />
         </div>
       </main>

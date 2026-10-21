@@ -4,6 +4,7 @@ import { Check, Minus, ChevronRight, ChevronDown, Loader2, AlertTriangle } from 
 import { AjudaIcone, MemoriaCalculo } from './Tooltip';
 import { formatarMoeda } from '../utils/format';
 import { API_URL } from '../utils/api';
+import { type ParametrosFiltro } from './FiltrosAnalise';
 
 interface Campo {
   grupo: 'atual' | 'reforma';
@@ -27,10 +28,12 @@ interface Nota {
 
 type Filtro = 'todas' | 'incompletas' | 'completas';
 
-export const CamposTributarios: React.FC<{ sessionId: string; token: string }> = ({
-  sessionId,
-  token,
-}) => {
+export const CamposTributarios: React.FC<{
+  sessionId: string;
+  token: string;
+  /** Filtros da análise (Entrada/Saída, CFOP e NCM), aplicados no servidor */
+  filtros: ParametrosFiltro;
+}> = ({ sessionId, token, filtros }) => {
   const [notas, setNotas] = useState<Nota[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
@@ -39,10 +42,13 @@ export const CamposTributarios: React.FC<{ sessionId: string; token: string }> =
 
   useEffect(() => {
     let ativo = true;
+    setCarregando(true);
+    setErro(null);
 
     axios
       .get(`${API_URL}/api/v1/dashboard/campos`, {
         headers: { 'x-session-id': sessionId, Authorization: `Bearer ${token}` },
+        params: filtros,
       })
       .then(r => {
         if (ativo) setNotas(r.data.data?.notas ?? []);
@@ -57,7 +63,7 @@ export const CamposTributarios: React.FC<{ sessionId: string; token: string }> =
     return () => {
       ativo = false;
     };
-  }, [sessionId, token]);
+  }, [sessionId, token, filtros]);
 
   const contagem = useMemo(
     () => ({

@@ -1,13 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
-import {
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Area, AreaChart,
-} from 'recharts';
+import { ResponsiveContainer, Area, AreaChart } from 'recharts';
 import {
   AlertTriangle, TrendingUp, TrendingDown, Loader2, Store, CornerUpLeft,
 } from 'lucide-react';
 import { AjudaIcone, MemoriaCalculo } from './Tooltip';
 import { API_URL } from '../utils/api';
+import { type ParametrosFiltro } from './FiltrosAnalise';
 import {
   formatarMoeda, formatarMoedaCompacta, formatarInteiro, formatarPercentual, formatarCNPJ,
 } from '../utils/format';
@@ -49,29 +48,6 @@ function chaveMes(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '—';
   return `${MESES[d.getMonth()]}/${String(d.getFullYear()).slice(2)}`;
-}
-
-/** Cor da célula do heatmap conforme a intensidade da variação */
-/**
- * Cor da célula do heatmap.
- *
- * A intensidade vem de quanto do tributo está em vigor (0 a 100%); o matiz
- * vem do sentido da linha na série inteira, e não do sinal da célula. Sem
- * isso, um tributo que só recua apareceria azul nos anos em que ainda está
- * cheio, invertendo a leitura.
- */
-function corHeatmap(
-  emVigor: number,
-  sentido: 'recuo' | 'avanco' | 'estavel'
-): string {
-  if (!Number.isFinite(emVigor) || emVigor <= 0) return 'rgba(17, 17, 17, 0.03)';
-
-  const intensidade = Math.min(1, emVigor / 100);
-  const alfa = 0.10 + intensidade * 0.62;
-
-  if (sentido === 'recuo') return `rgba(236, 72, 153, ${alfa})`;
-  if (sentido === 'avanco') return `rgba(127, 43, 245, ${alfa})`;
-  return `rgba(120, 118, 112, ${alfa * 0.5})`;
 }
 
 const Chip: React.FC<{
@@ -250,49 +226,60 @@ const Painel: React.FC<{
   </div>
 );
 
-export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = ({
-  sessionId,
-  token,
-}) => {
+export const PainelExecutivo: React.FC<{
+  sessionId: string;
+  token: string;
+  /** Filtros da análise (Entrada/Saída, CFOP e NCM), aplicados no servidor */
+  filtros: ParametrosFiltro;
+}> = ({ sessionId, token, filtros }) => {
   const [documentos, setDocumentos] = useState<Documento[]>([]);
-  const [transicao, setTransicao] = useState<any[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [regimeFiltro, setRegimeFiltro] = useState<string[]>([]);
-  const [tipoFiltro, setTipoFiltro] = useState<string[]>([]);
+  const [erro, setErro] = useState<string | null>(null);
 
   useEffect(() => {
+    let ativo = true;
     const cabecalhos = {
       headers: { 'x-session-id': sessionId, Authorization: `Bearer ${token}` },
     };
 
+    // Recorte novo: um regime escolhido antes pode nem existir nele, e
+    // continuaria filtrando sem chip visível.
+    setRegimeFiltro([]);
+
     (async () => {
       setCarregando(true);
+      setErro(null);
       try {
-        // Traz os documentos em páginas e calcula tudo localmente: assim os
-        // filtros respondem sem ida ao servidor a cada clique.
+        // Traz os documentos do recorte em páginas e calcula tudo localmente:
+        // assim o filtro de regime responde sem ida ao servidor a cada clique.
         const todos: Documento[] = [];
         let pagina = 1;
 
         while (pagina <= 10) {
           const r = await axios.get(`${API_URL}/api/v1/dashboard/documentos`, {
             ...cabecalhos,
-            params: { pagina, porPagina: 500 },
+            params: { ...filtros, pagina, porPagina: 500 },
           });
           todos.push(...r.data.data.documentos);
           if (todos.length >= r.data.data.total) break;
           pagina += 1;
         }
-        setDocumentos(todos);
-
-        const s = await axios.get(`${API_URL}/api/v1/reforma/serie`, cabecalhos);
-        setTransicao(s.data.data.serie.filter((x: any) => x.ano >= 2027));
+        if (ativo) setDocumentos(todos);
       } catch {
-        setDocumentos([]);
+        if (ativo) {
+          setDocumentos([]);
+          setErro('Não foi possível carregar o painel. Use "Atualizar dashboard" para tentar de novo.');
+        }
       } finally {
-        setCarregando(false);
+        if (ativo) setCarregando(false);
       }
     })();
-  }, [sessionId, token]);
+
+    return () => {
+      ativo = false;
+    };
+  }, [sessionId, token, filtros]);
 
   const regimes = useMemo(
     () => Array.from(new Set(documentos.map(d => d.regimeTributario))).sort(),
@@ -301,12 +288,10 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
 
   const filtrados = useMemo(
     () =>
-      documentos.filter(d => {
-        if (regimeFiltro.length && !regimeFiltro.includes(d.regimeTributario)) return false;
-        if (tipoFiltro.length && !tipoFiltro.includes(String(d.tipo).toLowerCase())) return false;
-        return true;
-      }),
-    [documentos, regimeFiltro, tipoFiltro]
+      documentos.filter(
+        d => !regimeFiltro.length || regimeFiltro.includes(d.regimeTributario)
+      ),
+    [documentos, regimeFiltro]
   );
 
   const alternar = (lista: string[], set: (v: string[]) => void, valor: string) =>
@@ -496,55 +481,6 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
     return lista.slice(0, 2);
   }, [dados]);
 
-  /**
-   * Heatmap da transição: quanto de cada tributo está em vigor em cada ano.
-   *
-   * A primeira versão comparava cada ano contra o primeiro ano da série, e
-   * isso quebrava para os tributos novos: o IBS tem alíquota fixa de teste de
-   * 0,1% em 2027 e chega a 19,2% em 2033, o que dava "+19100%" — número
-   * correto e ilegível. Aqui a referência é o próprio valor cheio do tributo
-   * na série, então o ICMS sai de 100% e vai a 0%, e o IBS faz o caminho
-   * inverso. É o que o painel quer contar: um recua, o outro avança.
-   */
-  const heatmap = useMemo(() => {
-    if (transicao.length === 0) return { linhas: [], anos: [], maximo: 0 };
-
-    const campos = [
-      { chave: 'icms', nome: 'ICMS' },
-      { chave: 'iss', nome: 'ISS' },
-      { chave: 'pis', nome: 'PIS' },
-      { chave: 'cofins', nome: 'COFINS' },
-      { chave: 'ibs', nome: 'IBS' },
-      { chave: 'cbs', nome: 'CBS' },
-    ];
-
-    const anos = transicao.map(t => t.ano);
-    let maximo = 0;
-
-    const linhas = campos.map(c => {
-      // Valor cheio do tributo na série. Zero significa que ele não aparece
-      // em nenhum ano do lote — a linha fica neutra em vez de inventar 100%.
-      const cheio = Math.max(...transicao.map(t => Math.abs(t[c.chave] || 0)));
-
-      const valores = transicao.map(t => {
-        const atual = t[c.chave] || 0;
-        const emVigor = cheio === 0 ? 0 : (Math.abs(atual) / cheio) * 100;
-        maximo = Math.max(maximo, emVigor);
-        return { ano: t.ano, valor: atual, variacao: emVigor };
-      });
-
-      // Tributo que termina a série menor do que começou está recuando.
-      const primeiro = Math.abs(transicao[0][c.chave] || 0);
-      const ultimo = Math.abs(transicao[transicao.length - 1][c.chave] || 0);
-      const sentido: 'recuo' | 'avanco' | 'estavel' =
-        cheio === 0 || primeiro === ultimo ? 'estavel' : ultimo < primeiro ? 'recuo' : 'avanco';
-
-      return { nome: c.nome, valores, sentido };
-    });
-
-    return { linhas, anos, maximo };
-  }, [transicao]);
-
   if (carregando) {
     return (
       <div className="flex items-center justify-center gap-2 py-20 text-tinta-fraca">
@@ -554,10 +490,16 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
     );
   }
 
+  if (erro) {
+    return (
+      <div className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-700">{erro}</div>
+    );
+  }
+
   if (documentos.length === 0) {
     return (
       <div className="rounded-lg border border-fundo-borda bg-fundo-card py-20 text-center text-tinta-fraca">
-        Importe um arquivo ZIP com XMLs para ver o painel.
+        Nenhuma nota com os filtros escolhidos.
       </div>
     );
   }
@@ -595,25 +537,9 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
           </Chip>
         ))}
 
-        <span className="ml-2 text-[11px] font-semibold uppercase tracking-wider text-tinta-forte">
-          Tipo
-        </span>
-        {['entrada', 'saida'].map(t => (
-          <Chip
-            key={t}
-            ativo={tipoFiltro.includes(t)}
-            onClick={() => alternar(tipoFiltro, setTipoFiltro, t)}
-          >
-            {t === 'entrada' ? 'Entrada' : 'Saída'}
-          </Chip>
-        ))}
-
-        {(regimeFiltro.length > 0 || tipoFiltro.length > 0) && (
+        {regimeFiltro.length > 0 && (
           <button
-            onClick={() => {
-              setRegimeFiltro([]);
-              setTipoFiltro([]);
-            }}
+            onClick={() => setRegimeFiltro([])}
             className="ml-auto text-[11px] font-medium text-red-600 hover:text-red-800"
           >
             Limpar filtros
@@ -662,93 +588,6 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
         <CartaoKPI rotulo="Carga tributária" valor={formatarPercentual(dados.carga, 1)} />
       </div>
 
-      {/* ==================== EVOLUÇÃO MENSAL ==================== */}
-      <Painel titulo="Evolução mensal" subtitulo="valor das notas e tributos destacados">
-        <ResponsiveContainer width="100%" height={240}>
-          <LineChart data={dados.serieMensal} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E3DC" />
-            <XAxis dataKey="mes" stroke="#888780" fontSize={11} tickLine={false} />
-            <YAxis
-              tickFormatter={formatarMoedaCompacta}
-              stroke="#888780"
-              fontSize={11}
-              tickLine={false}
-              axisLine={false}
-            />
-            <Tooltip
-              contentStyle={{
-                borderRadius: 8,
-                border: '1px solid #2a2a3a',
-                backgroundColor: '#FFFFFF',
-                color: '#3D3D3A',
-                fontSize: 12,
-              }}
-              formatter={(v: any, n: any) => [formatarMoeda(v), n === 'valor' ? 'Valor' : 'Tributos']}
-            />
-            <Line type="monotone" dataKey="valor" stroke="#7F2BF5" strokeWidth={2} dot={false} name="valor" />
-            <Line type="monotone" dataKey="tributos" stroke="#1D9E75" strokeWidth={1.5} dot={false} name="tributos" />
-          </LineChart>
-        </ResponsiveContainer>
-      </Painel>
-
-      {/* ==================== HEATMAP DA TRANSIÇÃO ==================== */}
-      {heatmap.linhas.length > 0 && (
-        <Painel
-          titulo="Variação por tributo e ano"
-          subtitulo="% do valor cheio em vigor em cada ano"
-          memoria={
-            <MemoriaCalculo
-              titulo="Variação por tributo e ano"
-              descricao="Quanto de cada tributo está em vigor em cada ano, em relação ao seu próprio valor cheio na série."
-              linhas={[
-                { rotulo: 'Fórmula', valor: 'ano ÷ maior valor da série' },
-                { rotulo: 'Referência', valor: 'valor cheio do próprio tributo' },
-              ]}
-              origem="A base não é o primeiro ano: tributos novos entram em alíquota de teste (o IBS começa em 0,1%) e comparar contra ela produzia percentuais de milhares."
-            />
-          }
-        >
-          <div className="overflow-x-auto">
-            <table className="w-full border-separate border-spacing-[2px] text-[11px]">
-              <thead>
-                <tr>
-                  <th className="w-24 text-left font-semibold text-tinta-forte" />
-                  {heatmap.anos.map(a => (
-                    <th key={a} className="pb-1 text-center font-semibold text-tinta-forte">
-                      {a}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {heatmap.linhas.map(linha => (
-                  <tr key={linha.nome}>
-                    <td className="pr-2 text-left font-medium text-rotulo">{linha.nome}</td>
-                    {linha.valores.map(c => (
-                      <td
-                        key={c.ano}
-                        className="rounded px-1 py-1.5 text-center font-medium text-tinta-forte"
-                        style={{ backgroundColor: corHeatmap(c.variacao, linha.sentido) }}
-                        title={`${linha.nome} em ${c.ano}: ${formatarMoeda(
-                          c.valor
-                        )} (${c.variacao.toFixed(0)}% do valor cheio)`}
-                      >
-                        {c.variacao.toFixed(0)}%
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="mt-2 text-[10px] leading-snug text-tinta-suave">
-            Cada célula mostra quanto do tributo está em vigor naquele ano, em
-            relação ao seu valor cheio na série. Roxo indica tributo que avança;
-            rosa, tributo que recua. Passe o mouse para ver o valor em reais.
-          </p>
-        </Painel>
-      )}
-
       {/* ==================== BARRAS ==================== */}
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <Painel
@@ -790,8 +629,7 @@ export const PainelExecutivo: React.FC<{ sessionId: string; token: string }> = (
 
               <p className="mt-3 border-t border-fundo-borda pt-3 text-[11px] leading-snug text-tinta-suave">
                 O que o prestador recolhe entra na apuração dele. O retido é
-                antecipação recolhida pelo tomador, e por isso não é confrontado na
-                aba Divergências, que compara a alíquota do regime do prestador.
+                antecipação recolhida pelo tomador.
               </p>
             </>
           )}

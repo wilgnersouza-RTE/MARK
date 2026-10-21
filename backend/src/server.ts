@@ -13,7 +13,6 @@ import dashboardRouter from './routes/dashboard';
 import exportRouter from './routes/export';
 import taxRouter from './routes/tax';
 import rtcRouter from './routes/rtc';
-import reformaRouter from './routes/reforma';
 
 validateConfig();
 
@@ -107,7 +106,6 @@ app.use('/api/v1/dashboard', dashboardRouter);
 app.use('/api/v1/export', exportRouter);
 app.use('/api/v1/tax', taxRouter);
 app.use('/api/v1/rtc', rtcRouter);
-app.use('/api/v1/reforma', reformaRouter);
 
 // ==================== 404 Handler ====================
 app.use((req, res) => {

@@ -4,8 +4,12 @@
  * GET /api/v1/dashboard/resumo       - Resumo geral
  * GET /api/v1/dashboard/regimes      - Consolidado por regime tributário
  * GET /api/v1/dashboard/fornecedores - Top fornecedores
- * GET /api/v1/dashboard/transicao    - Transição 2024-2027
  * GET /api/v1/dashboard/documentos   - Documentos da sessão
+ * GET /api/v1/dashboard/campos       - Conferência dos campos tributários
+ * GET /api/v1/dashboard/filtros      - Opções de Entrada/Saída, CFOP e NCM do lote
+ *
+ * Todas, menos /filtros, aceitam ?sentido=&cfop=&ncm= e respondem só pelas
+ * notas do recorte (ver utils/filtros.ts).
  */
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../middleware/auth';
@@ -13,11 +17,13 @@ import { sessionService } from '../services/session';
 import { resumoDoPreenchimento } from '../services/camposTributarios';
 import { dashboardService } from '../services/dashboard';
 import { DashboardData, NFeDocument } from '../types';
+import { filtrarDocumentos, lerFiltros, opcoesDoLote } from '../utils/filtros';
 
 const router = Router();
 
 /**
- * Resolve a sessão e devolve o dashboard já calculado.
+ * Resolve a sessão, aplica os filtros da query e devolve o dashboard
+ * calculado só sobre as notas do recorte.
  * Centraliza o que antes estava duplicado em cada rota.
  */
 async function carregarDashboard(
@@ -29,12 +35,15 @@ async function carregarDashboard(
     return { documentos: [], dashboard: null, sessionId: null };
   }
 
-  const documentos = sessionService.obterDocumentos(sessionId);
+  const doLote = sessionService.obterDocumentos(sessionId);
 
-  if (!documentos || documentos.length === 0) {
+  if (!doLote || doLote.length === 0) {
     return { documentos: [], dashboard: null, sessionId };
   }
 
+  // Com filtros sem nota em comum, o dashboard sai zerado (não nulo): a tela
+  // distingue "lote vazio" de "recorte vazio".
+  const documentos = filtrarDocumentos(doLote, lerFiltros(req.query));
   const dashboard = await dashboardService.generateDashboard(documentos);
   return { documentos, dashboard, sessionId };
 }
@@ -132,47 +141,6 @@ router.get('/fornecedores', authenticate, async (req: Request, res: Response) =>
 });
 
 /**
- * GET /api/v1/dashboard/transicao
- * Transição 2024-2027.
- * O serviço entrega colunas ({anos, tributos:{icms:[...]}}), mas o gráfico do
- * frontend precisa de linhas ([{ano, icms, iss, ...}]). A conversão é feita aqui
- * e o formato original vai junto, em `bruto`, para quem precisar dele.
- */
-router.get('/transicao', authenticate, async (req: Request, res: Response) => {
-  try {
-    const { dashboard, sessionId } = await carregarDashboard(req);
-
-    if (!sessionId) {
-      return erro(res, 400, 'Session ID não encontrado');
-    }
-
-    if (!dashboard) {
-      return responder(res, { dados: [], bruto: null });
-    }
-
-    const { anos, tributos, projecoes } = dashboard.transicaoAnual;
-
-    const dados = anos.map((ano, i) => ({
-      ano,
-      icms: tributos.icms[i] ?? 0,
-      iss: tributos.iss[i] ?? 0,
-      pis: tributos.pis[i] ?? 0,
-      cofins: tributos.cofins[i] ?? 0,
-      irrf: tributos.irrf[i] ?? 0,
-      projecaoIcms: projecoes.icms[i] ?? 0,
-      projecaoIss: projecoes.iss[i] ?? 0,
-      projecaoPis: projecoes.pis[i] ?? 0,
-      projecaoCofins: projecoes.cofins[i] ?? 0,
-      projecaoIrrf: projecoes.irrf[i] ?? 0,
-    }));
-
-    responder(res, { dados, bruto: dashboard.transicaoAnual });
-  } catch (error: any) {
-    erro(res, 500, error.message);
-  }
-});
-
-/**
  * GET /api/v1/dashboard/documentos
  * Documentos da sessão, com paginação simples
  */
@@ -184,7 +152,7 @@ router.get('/documentos', authenticate, async (req: Request, res: Response) => {
       return erro(res, 400, 'Session ID não encontrado');
     }
 
-    const documentos = sessionService.obterDocumentos(sessionId);
+    const documentos = filtrarDocumentos(sessionService.obterDocumentos(sessionId), lerFiltros(req.query));
 
     const pagina = Math.max(1, parseInt(String(req.query.pagina || '1'), 10) || 1);
     const porPagina = Math.min(500, Math.max(1, parseInt(String(req.query.porPagina || '50'), 10) || 50));
@@ -219,7 +187,7 @@ router.get('/campos', authenticate, async (req: Request, res: Response) => {
       return responder(res, []);
     }
 
-    const notas = sessao.documentos.map(doc => {
+    const notas = filtrarDocumentos(sessao.documentos, lerFiltros(req.query)).map(doc => {
       const campos = doc.camposTributarios ?? [];
       const { preenchidos, total } = resumoDoPreenchimento(campos);
 
@@ -244,8 +212,41 @@ router.get('/campos', authenticate, async (req: Request, res: Response) => {
         incompletas: notas.filter(n => n.preenchidos < n.totalCampos).length,
       },
     });
-  } catch (erro: any) {
-    res.status(500).json({ success: false, error: erro.message });
+  } catch (e: any) {
+    erro(res, 500, e.message);
+  }
+});
+
+/**
+ * GET /api/v1/dashboard/filtros
+ *
+ * Opções dos filtros da análise. CFOPs e NCMs saem do lote inteiro, não do
+ * recorte, para o contador poder trocar de código sem limpar os outros
+ * filtros. `sentidoPadrao` diz onde o filtro Entrada/Saída abre: em
+ * entradas quando há empresa analisada e ao menos uma nota de entrada; em
+ * todas nos demais casos, para o painel não abrir vazio.
+ */
+router.get('/filtros', authenticate, async (req: Request, res: Response) => {
+  try {
+    const sessionId = req.sessionId || (req.headers['x-session-id'] as string | undefined);
+
+    if (!sessionId) {
+      return erro(res, 400, 'Session ID não encontrado');
+    }
+
+    const sessao = sessionService.obterSessao(sessionId);
+    const documentos = sessao?.documentos ?? [];
+    const temEmpresa = !!sessao?.empresa;
+
+    responder(res, {
+      cfops: opcoesDoLote(documentos, 'cfops'),
+      ncms: opcoesDoLote(documentos, 'ncms'),
+      temEmpresa,
+      sentidoPadrao: temEmpresa && documentos.some(d => d.tipo === 'entrada') ? 'entrada' : 'todas',
+      totalDocumentos: documentos.length,
+    });
+  } catch (e: any) {
+    erro(res, 500, e.message);
   }
 });
 

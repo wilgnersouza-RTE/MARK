@@ -38,14 +38,17 @@ Mandato e oportunidade. A Reforma Tributária do Consumo exige campos novos (IBS
   - **intent:** O contador vê o painel do lote com participação por tributo, fornecedores por valor total e composição por regime tributário.
   - **success:** Os três blocos aparecem e respeitam os filtros ativos; evolução mensal e transição de tributação não aparecem.
 - **CAP-7**
-  - **intent:** O contador filtra a análise com filtros básicos visíveis por padrão e filtros avançados atrás de um botão, que substituem a página Configurações.
-  - **success:** Sem clicar em "Avançado", só os filtros básicos aparecem; ao clicar, os avançados abrem; aplicar qualquer filtro atualiza resumo, painel e lista de notas; a página Configurações não existe mais.
+  - **intent:** O contador filtra a análise por Entrada/Saída, CFOP e NCM numa barra de listas suspensas comum a todas as abas; a opção de configurações tributárias deixa de existir.
+  - **success:** Mudar qualquer um dos três filtros atualiza indicadores, painel, resumo e regimes; não há botão nem página de configurações tributárias.
 - **CAP-8**
   - **intent:** O contador exporta um relatório do que precisa mudar no lote.
   - **success:** O arquivo exportado lista, por nota, os campos da reforma ausentes e os cClassTrib incompatíveis, separa entradas e saídas e traz um consolidado com quantas notas têm cada problema, respeitando os filtros ativos.
 - **CAP-9**
   - **intent:** O contador filtra as notas pelo NCM dos itens.
   - **success:** Informar um NCM mostra só as NF-e e NFC-e com pelo menos um item daquele NCM, e resumo, painel, lista e relatório passam a considerar só essas notas.
+- **CAP-10**
+  - **intent:** O contador filtra as notas pelo CFOP dos itens (NF-e e NFC-e) ou da operação (CT-e).
+  - **success:** Escolher um CFOP mostra só as notas com pelo menos um item ou operação daquele CFOP; NFS-e, que não tem CFOP, fica fora enquanto o filtro estiver ativo.
 
 ## Constraints
 
@@ -75,7 +78,6 @@ Mandato e oportunidade. A Reforma Tributária do Consumo exige campos novos (IBS
 - O percentual do resumo conta só os campos da reforma; hoje o "X de Y" mistura campos atuais e da reforma.
 - O relatório da v1 diagnostica o que falta; dizer como corrigir é a parte que ficou fora.
 - As abas Transição e Regimes saem: a transição saiu do escopo e a composição por regime fica no painel.
-- Os campos da página Configurações (CST, cClassTrib, finalidade, CRT e outros) viram critérios dos filtros avançados, e não parâmetros da importação.
 - O Imposto Seletivo só conta como pendência quando o CST indicar incidência.
 - Com o filtro de NCM ativo, NFS-e e CT-e ficam fora do resultado, porque não têm NCM.
 - A organização das telas é proposta do Claude, pedida no briefing: ver `telas-v1.md`.
