@@ -16,8 +16,6 @@ export const MODELOS_DOCUMENTO = [
   { codigo: 'NFSE', nome: 'NFS-e', descricao: 'Nota Fiscal de Serviço Eletrônica — padrão nacional' },
 ] as const;
 
-export const CODIGOS_MODELO = MODELOS_DOCUMENTO.map(m => m.codigo);
-
 /** Rótulo completo, no formato usado nas telas e nas mensagens de erro. */
 export function rotuloModelo(codigo: number | string): string {
   const alvo = String(codigo).toUpperCase();

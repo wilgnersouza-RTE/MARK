@@ -1,6 +1,5 @@
 import { parseStringPromise } from 'xml2js';
 import { NFeDocument, NFeModel, DocumentType, RegimeTributario, Validacao, Divergencia } from '../types';
-import { rotuloModelo } from '../utils/modelos';
 import {
   conferirCamposNFe,
   conferirCamposNFSe,
@@ -10,6 +9,10 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import { taxRulesService } from './taxRules';
 import { reformaService } from './reforma';
+
+/** Motivo único de recusa para XML que não é nenhum dos documentos aceitos. */
+export const ERRO_ESTRUTURA_DESCONHECIDA =
+  'Estrutura de XML não reconhecida: o arquivo não é NF-e, NFC-e, CT-e, CT-e OS nem NFS-e.';
 
 export class NFEParserService {
   /**
@@ -55,9 +58,15 @@ export class NFEParserService {
     return Number(valor ?? 0);
   }
   /**
-   * Processa um XML de NF-e e extrai dados relevantes
+   * Processa um XML de documento fiscal e extrai dados relevantes.
+   *
+   * O modelo é identificado pela estrutura do próprio XML (NF-e, NFC-e,
+   * CT-e, CT-e OS ou NFS-e); ninguém escolhe antes. O sentido sai sempre
+   * 'indefinido': entrada ou saída depende da empresa analisada, que só se
+   * conhece olhando o lote inteiro (ver utils/sentidoImportacao.ts).
    */
-  async parseNFE(xmlContent: string, tipo: DocumentType, modelo: NFeModel): Promise<NFeDocument> {
+  async parseNFE(xmlContent: string): Promise<NFeDocument> {
+    const tipo: DocumentType = 'indefinido';
     try {
       const result = await parseStringPromise(xmlContent, {
         strict: true,
@@ -74,56 +83,32 @@ export class NFEParserService {
       const raiz = result.nfeProc || result.cteProc || result.cteOSProc || result;
 
       // NFS-e de qualquer município: estrutura própria, parser próprio.
-      const ehNFSe = this.ehNotaDeServico(raiz);
-      if (ehNFSe) {
-        if (modelo !== 'NFSE') {
-          throw new Error(
-            `Este arquivo é uma NFS-e. Você selecionou ${rotuloModelo(modelo)}.`
-          );
-        }
+      if (this.ehNotaDeServico(raiz)) {
         return this.parseNFSe(raiz, tipo);
       }
 
-      if (modelo === 'NFSE') {
-        throw new Error(
-          'Você selecionou NFS-e, mas este arquivo não é uma nota de serviço.'
-        );
-      }
+      const nfe = this.no(raiz.NFe?.infNFe || raiz.infNFe);
 
-      const nfe = raiz.NFe?.infNFe || raiz.infNFe;
-
-      // O ZIP pode misturar tipos de documento. Reconhecer o CT-e pela raiz
-      // permite dizer ao usuário exatamente o que ele importou, em vez de
-      // devolver "estrutura de XML inválida" para um arquivo perfeitamente
-      // válido que só não é uma NF-e.
       if (!nfe) {
         // CT-e de carga (57) e CT-e OS (67) são documentos distintos, com
-        // raízes próprias. O modelo declarado no XML é a fonte da verdade.
+        // raízes próprias. O modelo declarado no XML é a fonte da verdade;
+        // sem ele, vale a raiz.
         const cteOS = raiz.CTeOS?.infCte;
         const cteCarga = raiz.CTe?.infCte || raiz.infCte;
 
         if (cteOS || cteCarga) {
           const infCte = this.no(cteOS || cteCarga);
-          const modeloXmlCte = parseInt(this.texto(this.no(infCte?.ide)?.mod), 10);
-
-          if (modeloXmlCte !== modelo) {
-            throw new Error(
-              `Este arquivo é ${rotuloModelo(modeloXmlCte)}. ` +
-                `Você selecionou ${rotuloModelo(modelo)}.`
-            );
+          const modTexto = this.texto(this.no(infCte?.ide)?.mod);
+          const modeloXmlCte = parseInt(modTexto, 10);
+          if (modTexto && modeloXmlCte !== 57 && modeloXmlCte !== 67) {
+            throw new Error(ERRO_ESTRUTURA_DESCONHECIDA);
           }
+          const modeloCte: NFeModel = modTexto ? (modeloXmlCte as 57 | 67) : cteOS ? 67 : 57;
 
-          return this.parseCTe(raiz, tipo, modeloXmlCte as NFeModel);
+          return this.parseCTe(raiz, tipo, modeloCte);
         }
 
-        if (modelo === 57 || modelo === 67) {
-          throw new Error(
-            `Você selecionou ${rotuloModelo(modelo)}, mas este arquivo não é um CT-e.`
-          );
-        }
-        throw new Error(
-          'Estrutura de XML inválida: não é uma NF-e nem uma NFC-e reconhecível.'
-        );
+        throw new Error(ERRO_ESTRUTURA_DESCONHECIDA);
       }
 
       // Extrair dados básicos
@@ -132,14 +117,12 @@ export class NFEParserService {
       const dest = this.no(nfe.dest);
       const total = this.no(this.no(nfe.total)?.ICMSTot) || {};
 
-      // Validar modelo
-      const modeloXml = parseInt(this.texto(ide?.mod), 10) as NFeModel;
-      if (modeloXml !== modelo) {
-        throw new Error(
-          `Você selecionou ${rotuloModelo(modelo)}, mas este arquivo é ` +
-            `${rotuloModelo(modeloXml)}.`
-        );
+      // NF-e (55) e NFC-e (65) compartilham o leiaute; só a tag mod separa.
+      const modeloXml = parseInt(this.texto(ide?.mod), 10);
+      if (modeloXml !== 55 && modeloXml !== 65) {
+        throw new Error(ERRO_ESTRUTURA_DESCONHECIDA);
       }
+      const modelo: NFeModel = modeloXml;
 
       // Extrair chave NF-e (atributo Id, no formato "NFe" + 44 dígitos)
       const chaveNFe = this.texto(nfe.$?.Id).replace('NFe', '') || 'N/A';
@@ -635,15 +618,19 @@ export class NFEParserService {
      * participantes: 0 remetente, 1 expedidor, 2 recebedor, 3 destinatário.
      */
     const tomaDireto = this.no(cte.toma);
-    const codigoToma = this.texto(this.no(ide.toma3)?.toma) || this.texto(this.no(ide.toma4)?.toma);
+    // toma4 ("outros", código 4) traz o próprio tomador: CNPJ ou CPF e nome.
+    const toma4 = this.no(ide.toma4);
+    const codigoToma = this.texto(this.no(ide.toma3)?.toma) || this.texto(toma4?.toma);
     const participantes: Record<string, any> = {
       '0': this.no(cte.rem),
       '1': this.no(cte.exped),
       '2': this.no(cte.receb),
       '3': this.no(cte.dest),
     };
+    const toma4ComDocumento = toma4 && (codigoToma === '4' || toma4.CNPJ || toma4.CPF);
     const tomador =
       (tomaDireto?.CNPJ || tomaDireto?.CPF ? tomaDireto : null) ||
+      (toma4ComDocumento ? toma4 : null) ||
       this.no(participantes[codigoToma]) ||
       this.no(cte.dest) ||
       {};

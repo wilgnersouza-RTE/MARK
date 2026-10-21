@@ -9,7 +9,8 @@ Três NF-e modelo 55 usadas para validar o fluxo completo:
 | `nota3.xml` | `<nfeProc>` | Valores altos, para conferir os totais |
 
 `notas-exemplo.zip` contém as três, pronto para subir na tela de upload
-(tipo: entrada, modelo: 55).
+(sem escolher tipo nem modelo: as três entram como NF-e de entrada da
+empresa 99.888.777/0001-66, identificada pelo lote).
 
 Valores esperados no resumo: 3 documentos, R$ 112.000,00 de valor total e
 R$ 24.775,00 de tributos.

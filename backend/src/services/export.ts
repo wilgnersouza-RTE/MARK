@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { NFeDocument, DashboardData } from '../types';
+import { rotuloSentido } from '../utils/sentidoImportacao';
 
 export class ExcelExportService {
   /**
@@ -8,13 +9,14 @@ export class ExcelExportService {
   exportarDados(
     documentos: NFeDocument[],
     dashboard: DashboardData,
-    nomeArquivo: string = 'nfe-validator-export.xlsx'
+    /** false enquanto o contador não escolheu a empresa analisada */
+    temEmpresa: boolean = true
   ): Buffer {
     const workbook = XLSX.utils.book_new();
 
     // Adicionar abas
     this.addResumoAba(workbook, dashboard);
-    this.addDocumentosAba(workbook, documentos);
+    this.addDocumentosAba(workbook, documentos, temEmpresa);
     this.addPorRegimeAba(workbook, dashboard.porRegime);
     this.addPorFornecedorAba(workbook, dashboard.porFornecedor);
     this.addTransicaoAba(workbook, dashboard.transicaoAnual);
@@ -56,7 +58,7 @@ export class ExcelExportService {
   /**
    * Adiciona aba de documentos detalhados
    */
-  private addDocumentosAba(workbook: XLSX.WorkBook, documentos: NFeDocument[]): void {
+  private addDocumentosAba(workbook: XLSX.WorkBook, documentos: NFeDocument[], temEmpresa: boolean): void {
     const data = [
       [
         'ID',
@@ -80,7 +82,7 @@ export class ExcelExportService {
       data.push([
         doc.id.substring(0, 8),
         String(doc.modelo),
-        String(doc.tipo),
+        rotuloSentido(doc.tipo, temEmpresa),
         doc.chaveNFe,
         new Date(doc.dataEmissao).toLocaleDateString('pt-BR'),
         `${doc.nomeEmitente} (${doc.cnpjEmitente})`,

@@ -27,14 +27,28 @@ import {
   formatarMoeda, formatarMoedaCompacta, formatarInteiro,
   formatarPercentual, formatarCNPJ,
 } from './utils/format';
-import {
-  MODELOS_DOCUMENTO,
-  type ModeloDocumento,
-  type ArquivoRejeitado,
-} from './utils/modelos';
+import { type ArquivoRejeitado } from './utils/modelos';
 
 
 // ==================== TIPOS ====================
+
+/** Candidato a empresa analisada, como o backend devolve no upload. */
+interface CandidatoEmpresa {
+  cnpj: string;
+  nome: string;
+  quantidadeNotas: number;
+}
+
+/** Resumo do lote vigente, devolvido por /upload/nfe e /upload/empresa. */
+interface ResumoLote {
+  documentosImportados?: number;
+  totalDocumentosSessao?: number;
+  porModelo: { modelo: string; rotulo: string; quantidade: number }[];
+  porSentido: { entrada: number; saida: number; indefinido: number };
+  empresa: { cnpj: string; nome: string; inferida: boolean } | null;
+  candidatosEmpresa: CandidatoEmpresa[];
+  precisaEscolherEmpresa: boolean;
+}
 
 
 interface ResumoGeral {
@@ -342,16 +356,45 @@ const UploadSection: React.FC<{
 }> = ({ sessionId, token, onUploadSuccess, config, onConfigChange }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [tipo, setTipo] = useState<'entrada' | 'saida'>('entrada');
-  const [modelo, setModelo] = useState<ModeloDocumento>('55');
-  // Arquivos que o ZIP trazia mas que não batiam com o que foi selecionado.
+  // Arquivos do ZIP que não puderam ser lidos, com o motivo.
   const [rejeitados, setRejeitados] = useState<ArquivoRejeitado[]>([]);
   const [baixandoErros, setBaixandoErros] = useState(false);
-  // Preenchido quando o lote não permitiu conferir entrada x saída.
-  const [sentidoNaoVerificado, setSentidoNaoVerificado] = useState<string | null>(null);
   // Quantos documentos da importação anterior foram descartados.
   const [substituidos, setSubstituidos] = useState(0);
   const [mostrarConfig, setMostrarConfig] = useState(false);
+  // Resumo do lote vigente: modelos, sentidos e empresa analisada.
+  const [lote, setLote] = useState<ResumoLote | null>(null);
+  const [arrastando, setArrastando] = useState(false);
+  // Lista de CNPJs aberta pelo botão "Alterar".
+  const [alterandoEmpresa, setAlterandoEmpresa] = useState(false);
+  const [salvandoEmpresa, setSalvandoEmpresa] = useState(false);
+  const [erroEmpresa, setErroEmpresa] = useState<string | null>(null);
+
+  /**
+   * Troca a empresa analisada. O servidor reclassifica as notas já
+   * importadas; não há novo upload.
+   */
+  const escolherEmpresa = async (cnpj: string) => {
+    setSalvandoEmpresa(true);
+    setErroEmpresa(null);
+    try {
+      const resposta = await axios.post(
+        `${API_URL}/api/v1/upload/empresa`,
+        { cnpj },
+        { headers: { Authorization: `Bearer ${token}`, 'x-session-id': sessionId } }
+      );
+      const atualizado = resposta.data?.data?.importacao;
+      if (atualizado) {
+        setLote(atual => (atual ? { ...atual, ...atualizado } : atualizado));
+      }
+      setAlterandoEmpresa(false);
+      await onUploadSuccess();
+    } catch (error: any) {
+      setErroEmpresa(error.response?.data?.error || 'Não foi possível trocar a empresa analisada.');
+    } finally {
+      setSalvandoEmpresa(false);
+    }
+  };
 
   /**
    * Baixa a planilha com todos os arquivos recusados.
@@ -364,7 +407,7 @@ const UploadSection: React.FC<{
     try {
       const resposta = await axios.post(
         `${API_URL}/api/v1/export/erros-importacao`,
-        { erros: rejeitados, tipo, modelo },
+        { erros: rejeitados },
         {
           headers: { Authorization: `Bearer ${token}`, 'x-session-id': sessionId },
           responseType: 'blob',
@@ -384,8 +427,9 @@ const UploadSection: React.FC<{
     }
   };
 
-  const handleFileUpload = async (file: File) => {
-    if (!file.name.endsWith('.zip')) {
+  const handleFileUpload = async (file: File | undefined) => {
+    if (!file || isUploading) return;
+    if (!file.name.toLowerCase().endsWith('.zip')) {
       setUploadError('Apenas arquivos ZIP são permitidos');
       return;
     }
@@ -393,14 +437,14 @@ const UploadSection: React.FC<{
     setIsUploading(true);
     setUploadError(null);
     setRejeitados([]);
-    setSentidoNaoVerificado(null);
     setSubstituidos(0);
+    setLote(null);
+    setAlterandoEmpresa(false);
+    setErroEmpresa(null);
 
     try {
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('tipo', tipo);
-      formData.append('modelo', modelo);
       // Configurações da Reforma Tributária vão junto e ficam registradas na importação
       formData.append('configuracao', JSON.stringify(config));
 
@@ -416,9 +460,7 @@ const UploadSection: React.FC<{
         // Importação parcial: alguns XMLs entraram, outros foram recusados.
         // Antes isso passava em silêncio e o usuário só via o total errado.
         setRejeitados(response.data.data?.erros ?? []);
-        setSentidoNaoVerificado(
-          response.data.data?.importacao?.sentidoNaoVerificado ?? null
-        );
+        setLote(response.data.data?.importacao ?? null);
         setSubstituidos(response.data.data?.importacao?.documentosSubstituidos ?? 0);
         await onUploadSuccess();
       } else {
@@ -433,73 +475,171 @@ const UploadSection: React.FC<{
     }
   };
 
+  const mostrarCandidatos = !!lote && (lote.precisaEscolherEmpresa || alterandoEmpresa);
+
   return (
     <Card className="border-2 border-dashed border-marca-azul/40 bg-marca-azul/[0.06]">
       <div className="text-center">
-        <Upload className="mx-auto mb-4 text-marca-azul" size={40} />
         <div className="mb-4 flex items-center justify-center gap-2">
           <h3 className="text-lg font-semibold">Importar Notas Fiscais</h3>
           <AjudaIcone
-            largura={340}
+            largura={360}
             conteudo={
               <MemoriaCalculo
-                titulo="Como a importação é validada"
-                descricao="Cada XML do ZIP é conferido contra o tipo e o modelo selecionados antes de entrar na base."
+                titulo="Como a importação funciona"
+                descricao="Envie o ZIP do mês com todas as notas juntas, de entrada e de saída. Não é preciso escolher nada antes."
                 linhas={[
-                  { rotulo: 'Modelo', valor: 'comparado à tag mod do XML' },
-                  { rotulo: 'Conteúdo', valor: 'precisa ter valores fiscais' },
-                  { rotulo: 'Recusados', valor: 'listados com o motivo' },
+                  { rotulo: 'Modelo', valor: 'NF-e, NFC-e, CT-e, CT-e OS e NFS-e, lido do próprio XML' },
+                  { rotulo: 'Empresa', valor: 'o CNPJ que aparece em pelo menos 80% das notas' },
+                  { rotulo: 'Entrada', valor: 'a empresa é destinatária ou tomadora' },
+                  { rotulo: 'Saída', valor: 'a empresa é emitente' },
+                  { rotulo: 'Recusados', valor: 'XML corrompido, sem valores ou desconhecido' },
                 ]}
-                origem="Arquivo de modelo diferente do selecionado é recusado individualmente, sem derrubar a importação inteira."
+                origem="Se a empresa não puder ser identificada, a tela lista os CNPJs do lote para você escolher. A escolha pode ser trocada depois, sem novo upload."
               />
             }
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-4 mb-4">
-          <div>
-            <label className="block text-sm font-medium text-tinta-media mb-2">Tipo</label>
-            <select
-              value={tipo}
-              onChange={e => setTipo(e.target.value as 'entrada' | 'saida')}
-              className="w-full px-3 py-2 border border-fundo-borda rounded-lg"
-            >
-              <option value="entrada">Entrada</option>
-              <option value="saida">Saída</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-tinta-media mb-2">Modelo</label>
-            <select
-              value={modelo}
-              onChange={e => setModelo(e.target.value as ModeloDocumento)}
-              className="w-full px-3 py-2 border border-fundo-borda rounded-lg"
-            >
-              {MODELOS_DOCUMENTO.map(m => (
-                <option key={m.codigo} value={m.codigo}>
-                  {m.nome} ({m.codigo})
-                </option>
-              ))}
-            </select>
-          </div>
+        {/*
+          Área de arrastar e soltar. O botão continua para quem prefere
+          escolher o arquivo; os dois caminhos chamam o mesmo envio.
+        */}
+        <div
+          onDragOver={e => {
+            e.preventDefault();
+            if (!isUploading) setArrastando(true);
+          }}
+          onDragLeave={e => {
+            e.preventDefault();
+            // Passar sobre o ícone, o texto ou o botão também dispara
+            // dragleave; só apaga o destaque quando sai da área de fato.
+            if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+            setArrastando(false);
+          }}
+          onDrop={e => {
+            e.preventDefault();
+            setArrastando(false);
+            handleFileUpload(e.dataTransfer.files?.[0]);
+          }}
+          className={`rounded-xl border-2 border-dashed px-4 py-8 transition ${
+            arrastando ? 'border-marca-azul bg-marca-azul/10' : 'border-fundo-borda'
+          }`}
+        >
+          <Upload className="mx-auto mb-3 text-marca-azul" size={40} />
+          <p className="mb-4 text-sm text-tinta-media">
+            {isUploading
+              ? 'Processando o ZIP...'
+              : arrastando
+                ? 'Solte o ZIP para importar'
+                : 'Arraste o ZIP do mês para cá ou'}
+          </p>
+
+          <input
+            type="file"
+            accept=".zip"
+            onChange={e => {
+              handleFileUpload(e.target.files?.[0]);
+              // Permite reenviar o mesmo arquivo em seguida.
+              e.target.value = '';
+            }}
+            disabled={isUploading}
+            className="hidden"
+            id="file-input"
+          />
+          <label
+            htmlFor="file-input"
+            className={`inline-block rounded-lg bg-gradient-to-r from-marca-azul to-marca-roxo px-6 py-3 font-semibold text-white shadow-neon transition hover:opacity-90 ${
+              isUploading ? 'pointer-events-none opacity-50' : 'cursor-pointer'
+            }`}
+          >
+            {isUploading ? 'Processando...' : 'Escolher arquivo ZIP'}
+          </label>
         </div>
 
-        <input
-          type="file"
-          accept=".zip"
-          onChange={e => e.target.files && handleFileUpload(e.target.files[0])}
-          disabled={isUploading}
-          className="hidden"
-          id="file-input"
-        />
-        <label
-          htmlFor="file-input"
-          className="inline-block cursor-pointer rounded-lg bg-gradient-to-r from-marca-azul to-marca-roxo px-6 py-3 font-semibold text-white shadow-neon transition hover:opacity-90 disabled:opacity-50"
-        >
-          {isUploading ? 'Processando...' : 'Escolher arquivo ZIP'}
-        </label>
-
         {uploadError && <p className="mt-4 text-sm text-red-600">{uploadError}</p>}
+
+        {lote && (
+          <div className="mt-4 rounded-lg border border-fundo-borda bg-fundo-card p-4 text-left text-sm">
+            <p className="font-semibold text-tinta-forte">
+              {formatarInteiro(lote.totalDocumentosSessao ?? lote.documentosImportados ?? 0)} nota
+              {(lote.totalDocumentosSessao ?? lote.documentosImportados ?? 0) === 1 ? '' : 's'} importada
+              {(lote.totalDocumentosSessao ?? lote.documentosImportados ?? 0) === 1 ? '' : 's'}
+            </p>
+            <p className="mt-1 text-xs text-tinta-media">
+              {lote.porModelo.map(m => `${m.rotulo}: ${formatarInteiro(m.quantidade)}`).join(' · ')}
+            </p>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              <span className="rounded-full bg-marca-azul/10 px-3 py-1 text-xs font-semibold text-marca-azul">
+                Entradas: {formatarInteiro(lote.porSentido.entrada)}
+              </span>
+              <span className="rounded-full bg-marca-roxo/10 px-3 py-1 text-xs font-semibold text-marca-roxo">
+                Saídas: {formatarInteiro(lote.porSentido.saida)}
+              </span>
+              <span className="rounded-full bg-fundo-eleva px-3 py-1 text-xs font-semibold text-tinta-media">
+                Sem vínculo: {formatarInteiro(lote.porSentido.indefinido)}
+              </span>
+            </div>
+
+            {lote.empresa ? (
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-tinta-media">
+                <Building2 size={14} className="text-marca-azul" />
+                <span>
+                  Empresa analisada:{' '}
+                  <strong className="text-tinta-forte">{lote.empresa.nome}</strong> (
+                  {formatarCNPJ(lote.empresa.cnpj)}){' '}
+                  {lote.empresa.inferida ? '— identificada pelo lote' : '— escolhida por você'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setAlterandoEmpresa(v => !v)}
+                  className="rounded-md border border-marca-azul/40 px-2 py-0.5 font-semibold text-marca-azul transition hover:bg-marca-azul/10"
+                >
+                  {alterandoEmpresa ? 'Cancelar' : 'Alterar'}
+                </button>
+              </div>
+            ) : (
+              <p className="mt-3 rounded-lg border border-amber-400/60 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                Não foi possível identificar a empresa analisada neste lote. Escolha abaixo
+                qual CNPJ é o da empresa; até lá, as notas ficam sem entrada ou saída.
+              </p>
+            )}
+
+            {mostrarCandidatos && (
+              <div className="mt-3">
+                <p className="mb-2 text-xs font-semibold text-tinta-media">
+                  CNPJs encontrados no lote
+                </p>
+                <ul className="space-y-1">
+                  {lote.candidatosEmpresa.map(c => (
+                    <li key={c.cnpj}>
+                      <button
+                        type="button"
+                        disabled={salvandoEmpresa || lote.empresa?.cnpj === c.cnpj}
+                        onClick={() => escolherEmpresa(c.cnpj)}
+                        className="flex w-full flex-wrap items-center justify-between gap-2 rounded-lg border border-fundo-borda px-3 py-2 text-left text-xs transition hover:border-marca-azul hover:bg-marca-azul/5 disabled:cursor-default disabled:opacity-60"
+                      >
+                        <span>
+                          <strong className="text-tinta-forte">{c.nome}</strong>{' '}
+                          <span className="font-mono text-tinta-suave">{formatarCNPJ(c.cnpj)}</span>
+                        </span>
+                        <span className="text-tinta-suave">
+                          {formatarInteiro(c.quantidadeNotas)} nota{c.quantidadeNotas === 1 ? '' : 's'}
+                          {lote.empresa?.cnpj === c.cnpj ? ' · atual' : ''}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                {salvandoEmpresa && (
+                  <p className="mt-2 text-xs text-tinta-suave">Reclassificando as notas...</p>
+                )}
+                {erroEmpresa && <p className="mt-2 text-xs text-red-600">{erroEmpresa}</p>}
+              </div>
+            )}
+          </div>
+        )}
 
         {substituidos > 0 && (
           <p className="mt-4 rounded-lg border border-marca-azul/40 bg-marca-azul/5 px-3 py-2 text-left text-xs text-tinta-media">
@@ -507,12 +647,6 @@ const UploadSection: React.FC<{
             {substituidos > 1 ? 's' : ''} da importação anterior
             {substituidos > 1 ? ' foram descartados' : ' foi descartado'}. Cada
             importação recomeça a análise do zero.
-          </p>
-        )}
-
-        {sentidoNaoVerificado && (
-          <p className="mt-4 rounded-lg border border-fundo-borda bg-fundo-eleva px-3 py-2 text-left text-xs text-tinta-media">
-            Entrada ou saída não pôde ser conferido neste lote. {sentidoNaoVerificado}
           </p>
         )}
 
