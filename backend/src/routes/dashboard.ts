@@ -14,7 +14,13 @@
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../middleware/auth';
 import { sessionService } from '../services/session';
-import { resumoDoPreenchimento } from '../services/camposTributarios';
+import {
+  DATA_DE_CORTE,
+  conferirReforma,
+  diaDaNota,
+  resumoPorSentido,
+  tabelaCarregada,
+} from '../services/conferenciaReforma';
 import { dashboardService } from '../services/dashboard';
 import { DashboardData, NFeDocument } from '../types';
 import { filtrarDocumentos, lerFiltros, opcoesDoLote } from '../utils/filtros';
@@ -173,44 +179,63 @@ router.get('/documentos', authenticate, async (req: Request, res: Response) => {
 /**
  * GET /api/v1/dashboard/campos
  *
- * Conferência de preenchimento dos campos tributários, nota a nota. Resposta
- * enxuta de propósito: a tela lista as notas e só abre os campos da que o
- * usuário expandir, mas paginar aqui exigiria manter estado no servidor para
- * um volume que cabe folgado numa resposta só.
+ * Conferência da reforma nota a nota (ver services/conferenciaReforma.ts):
+ * situação, pendências pelo nome do campo, avisos e, em `porSentido`, o
+ * percentual de completas em entradas e saídas. Sem paginação: paginar
+ * exigiria manter estado no servidor para um volume que cabe folgado numa
+ * resposta só. Sem sessão, devolve o mesmo formato com tudo zerado.
  */
 router.get('/campos', authenticate, async (req: Request, res: Response) => {
   try {
     const sessionId = req.sessionId!;
     const sessao = sessionService.obterSessao(sessionId);
+    const tabela = tabelaCarregada();
+    const filtros = lerFiltros(req.query);
+    const documentos = sessao?.documentos ?? [];
 
-    if (!sessao) {
-      return responder(res, []);
-    }
+    // Os cartões Entradas e Saídas são a própria divisão por sentido: ignoram
+    // esse filtro e respeitam CFOP e NCM. Confere-se uma vez o recorte sem
+    // sentido; a lista aplica o sentido depois.
+    const conferidas = filtrarDocumentos(documentos, { ...filtros, sentido: undefined }).map(
+      doc => ({ doc, conferencia: conferirReforma(doc, tabela) })
+    );
+    const porSentido = resumoPorSentido(
+      conferidas.map(({ doc, conferencia }) => ({ tipo: doc.tipo, situacao: conferencia.situacao }))
+    );
 
-    const notas = filtrarDocumentos(sessao.documentos, lerFiltros(req.query)).map(doc => {
-      const campos = doc.camposTributarios ?? [];
-      const { preenchidos, total } = resumoDoPreenchimento(campos);
-
-      return {
+    const notas = conferidas
+      .filter(({ doc }) => !filtros.sentido || doc.tipo === filtros.sentido)
+      .map(({ doc, conferencia }) => ({
         id: doc.id,
         numero: doc.chaveNFe,
         modelo: doc.modelo,
+        sentido: doc.tipo,
+        diaEmissao: diaDaNota(doc),
         emitente: doc.nomeEmitente,
         cnpjEmitente: doc.cnpjEmitente,
         valor: doc.values.total,
-        preenchidos,
-        totalCampos: total,
-        campos,
-      };
-    });
+        situacao: conferencia.situacao,
+        pendencias: conferencia.pendencias,
+        avisos: conferencia.avisos,
+        informativos: conferencia.informativos,
+        campos: doc.camposTributarios ?? [],
+      }));
+
+    const contar = (situacao: string) => notas.filter(n => n.situacao === situacao).length;
 
     responder(res, {
       notas,
       resumo: {
         total: notas.length,
-        completas: notas.filter(n => n.preenchidos === n.totalCampos).length,
-        incompletas: notas.filter(n => n.preenchidos < n.totalCampos).length,
+        completas: contar('completa'),
+        comPendencia: contar('com pendência'),
+        foraDoPeriodo: contar('fora do período'),
+        semData: contar('sem data'),
       },
+      porSentido,
+      temEmpresa: !!sessao?.empresa,
+      versaoTabela: tabela.versao,
+      dataDeCorte: DATA_DE_CORTE,
     });
   } catch (e: any) {
     erro(res, 500, e.message);

@@ -12,7 +12,11 @@ import {
 
 import { MarcaRTE } from './components/Marca';
 import { Tooltip as DicaHover, AjudaIcone, MemoriaCalculo } from './components/Tooltip';
-import { CamposTributarios } from './components/CamposTributarios';
+import {
+  CamposTributarios,
+  CartoesReforma,
+  useConferenciaReforma,
+} from './components/CamposTributarios';
 import { AbaAdministracao } from './components/AbaAdministracao';
 import { TelaLogin } from './components/TelaLogin';
 import { PainelExecutivo } from './components/PainelExecutivo';
@@ -702,6 +706,9 @@ const DashboardContent: React.FC<{
   // Objeto estável por seleção: os filhos refazem a busca só quando ele muda.
   const parametros = useMemo(() => (filtros ? paraParametros(filtros) : null), [filtros]);
 
+  // Uma busca só alimenta os cartões Entradas e Saídas e a lista de notas.
+  const conferencia = useConferenciaReforma(sessionId, token, parametros);
+
   // Busca as opções. Lote novo abre os filtros no padrão que o servidor
   // indica; numa recarga a seleção atual é mantida (objeto novo, para todas
   // as buscas serem refeitas).
@@ -983,6 +990,9 @@ const DashboardContent: React.FC<{
       <div>
         {activeTab === 'painel' && parametros && (
           <div className="space-y-6">
+            {/* CAP-5: o resumo do lote parte do percentual de notas completas. */}
+            <CartoesReforma conferencia={conferencia} />
+
             <PainelExecutivo sessionId={sessionId} token={token} filtros={parametros} />
 
             {/* Resumo: o conteúdo da antiga aba Detalhado. */}
@@ -1106,12 +1116,8 @@ const DashboardContent: React.FC<{
               })()}
             </Card>
 
-            {/*
-              A conferência de preenchimento fica no fim do painel: é leitura
-              de apoio, feita depois de olhar os números, e não o primeiro
-              dado que alguém procura ao abrir o sistema.
-            */}
-            <CamposTributarios sessionId={sessionId} token={token} filtros={parametros} />
+            {/* Lista de notas com o que falta, pelo nome do campo. */}
+            <CamposTributarios conferencia={conferencia} />
           </div>
         )}
 

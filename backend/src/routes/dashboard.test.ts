@@ -6,6 +6,7 @@ import { config } from '../config';
 import { sessionService } from '../services/session';
 import { DocumentType, NFeDocument, NFeModel } from '../types';
 import dashboardRoutes from './dashboard';
+import { conferirCamposNFe } from '../services/camposTributarios';
 
 const USUARIO = 'teste-dashboard';
 const EMPRESA = '11111111000111';
@@ -214,5 +215,107 @@ describe('filtros aplicados ao dashboard', () => {
     const cabecalhos = await sessaoComLote(lote(), true);
     const resposta = await fetch(`${base}/transicao`, { headers: cabecalhos });
     expect(resposta.status).toBe(404);
+  });
+});
+
+describe('GET /dashboard/campos: conferência da reforma', () => {
+  const ITEM_COMPLETO = {
+    cstReforma: '000', cClassTrib: '000001', baseIBSCBS: '100.00', ibsEstadual: '0.10',
+    ibsMunicipal: '0.00', cbs: '0.90',
+  };
+
+  function completa(doc: NFeDocument): NFeDocument {
+    return {
+      ...doc,
+      camposTributarios: conferirCamposNFe([ITEM_COMPLETO]),
+      reformaItens: [{ cst: '000', cClassTrib: '000001' }],
+    };
+  }
+
+  function loteReforma(): NFeDocument[] {
+    return [
+      completa(nota('entrada', 55, ['1102'], [], 100)),
+      completa(nota('entrada', 55, ['1102'], [], 100)),
+      completa(nota('entrada', 55, ['1403'], [], 100)),
+      // Sem campos da reforma: com pendência
+      nota('entrada', 55, ['1102'], [], 100),
+      // Antes do corte e sem data: fora do percentual
+      { ...completa(nota('entrada', 55, ['1102'], [], 100)), dataEmissao: '2025-12-15T13:00:00.000Z' },
+      { ...nota('entrada', 55, ['1102'], [], 100), semDataEmissao: true },
+      completa(nota('saida', 55, ['5102'], [], 100)),
+      nota('saida', 55, ['5102'], [], 100),
+    ];
+  }
+
+  it('devolve situação, pendências e o resumo por sentido', async () => {
+    const cabecalhos = await sessaoComLote(loteReforma(), true);
+    const { corpo } = await get('/campos', cabecalhos);
+
+    expect(corpo.data.porSentido).toEqual({
+      entrada: { total: 4, completas: 3, percentual: 75 },
+      saida: { total: 2, completas: 1, percentual: 50 },
+      semVinculo: { total: 0, completas: 0, percentual: 0 },
+      total: { total: 6, completas: 4, percentual: 66.7 },
+    });
+    expect(corpo.data.temEmpresa).toBe(true);
+    expect(corpo.data.dataDeCorte).toBe('2026-01-01');
+    expect(corpo.data.resumo).toEqual({
+      total: 8, completas: 4, comPendencia: 2, foraDoPeriodo: 1, semData: 1,
+    });
+    expect(corpo.data.versaoTabela).toEqual(expect.any(String));
+
+    const pendente = corpo.data.notas.find((n: any) => n.situacao === 'com pendência');
+    expect(pendente).toEqual(
+      expect.objectContaining({ sentido: 'entrada', diaEmissao: '2026-02-01' })
+    );
+    expect(pendente.pendencias.map((p: any) => p.texto)).toContain('CBS');
+
+    const semData = corpo.data.notas.find((n: any) => n.situacao === 'sem data');
+    expect(semData.diaEmissao).toBeNull();
+    expect(semData.avisos).toHaveLength(1);
+  });
+
+  it('sem empresa, temEmpresa é false e as notas exigíveis ficam sem vínculo', async () => {
+    const cabecalhos = await sessaoComLote(loteReforma(), false);
+    const { corpo } = await get('/campos', cabecalhos);
+    expect(corpo.data.temEmpresa).toBe(false);
+    expect(corpo.data.porSentido.entrada.total).toBe(0);
+    expect(corpo.data.porSentido.semVinculo).toEqual({ total: 6, completas: 4, percentual: 66.7 });
+  });
+
+  it('a lista respeita o sentido, mas os cartões não', async () => {
+    const cabecalhos = await sessaoComLote(loteReforma(), true);
+    const { corpo } = await get('/campos?sentido=saida', cabecalhos);
+    expect(corpo.data.notas).toHaveLength(2);
+    expect(corpo.data.porSentido.entrada.total).toBe(4);
+  });
+
+  it('os cartões respeitam CFOP', async () => {
+    const cabecalhos = await sessaoComLote(loteReforma(), true);
+    const { corpo } = await get('/campos?cfop=1403', cabecalhos);
+    expect(corpo.data.notas).toHaveLength(1);
+    expect(corpo.data.porSentido).toEqual({
+      entrada: { total: 1, completas: 1, percentual: 100 },
+      saida: { total: 0, completas: 0, percentual: 0 },
+      semVinculo: { total: 0, completas: 0, percentual: 0 },
+      total: { total: 1, completas: 1, percentual: 100 },
+    });
+  });
+
+  it('sem sessão devolve o mesmo formato, vazio', async () => {
+    const outro = jwt.sign(
+      { userId: 'sem-sessao', email: 'x@exemplo.com', sessionId: 'sessao-inexistente' },
+      config.jwt.secret
+    );
+    const { status, corpo } = await get('/campos', {
+      Authorization: `Bearer ${outro}`,
+      'x-session-id': 'sessao-inexistente',
+    });
+    expect(status).toBe(200);
+    expect(corpo.data.notas).toEqual([]);
+    expect(corpo.data.resumo.total).toBe(0);
+    const zero = { total: 0, completas: 0, percentual: 0 };
+    expect(corpo.data.porSentido).toEqual({ entrada: zero, saida: zero, semVinculo: zero, total: zero });
+    expect(corpo.data.temEmpresa).toBe(false);
   });
 });

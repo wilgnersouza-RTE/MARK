@@ -171,17 +171,6 @@ export function conferirCamposNFe(itens: ItemConferido[]): CampoTributario[] {
   ];
 }
 
-/** Quantos campos estão preenchidos, para o resumo da linha da nota. */
-export function resumoDoPreenchimento(campos: CampoTributario[]): {
-  preenchidos: number;
-  total: number;
-} {
-  return {
-    preenchidos: campos.filter(c => c.situacao === 'preenchido').length,
-    total: campos.length,
-  };
-}
-
 /** Rótulo do documento, usado no cabeçalho da conferência. */
 export function rotuloDoModelo(modelo: NFeModel): string {
   return modelo === 'NFSE' ? 'NFS-e' : `modelo ${modelo}`;

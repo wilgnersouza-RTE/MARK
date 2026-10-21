@@ -31,4 +31,4 @@ Campos que contam para "completa" em CAP-4 e para o percentual de CAP-5. Os sete
 ## Regra de completude
 
 - Nota completa: os sete campos presentes (em NF-e e NFC-e, presentes em todos os itens) e nenhum cClassTrib incompatível com o CST.
-- Imposto Seletivo só é exigido quando o CST indicar incidência; ausência em operação sem Seletivo não é pendência. Escolha do Claude, a confirmar com o time tributário.
+- Imposto Seletivo ausente nunca é pendência na v1 (decisão do usuário em 2026-10-21): o XML lido não indica se o Seletivo incide sobre o item. Aparece como informativo "só exigido para itens sujeitos ao Seletivo". A nota é completa com os outros seis campos presentes e nenhum cClassTrib incompatível.

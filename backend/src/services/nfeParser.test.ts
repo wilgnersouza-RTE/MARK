@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { nfeParserService, ERRO_ESTRUTURA_DESCONHECIDA } from './nfeParser';
+import { conferirReforma, tabelaCarregada } from './conferenciaReforma';
 
 const NOTA1 = path.resolve(__dirname, '../../../exemplos/nota1.xml');
 
@@ -189,5 +190,148 @@ describe('parseNFE: CFOP e NCM para os filtros', () => {
     const doc = await nfeParserService.parseNFE(NFSE);
     expect(doc.cfops).toEqual([]);
     expect(doc.ncms).toEqual([]);
+  });
+});
+
+describe('parseNFE: pares CST/cClassTrib da reforma e data de emissão', () => {
+  function nfeComReforma(itens: Array<{ cst?: string; cClassTrib?: string }>): string {
+    const det = itens
+      .map(
+        (item, i) =>
+          `<det nItem="${i + 1}"><prod><cProd>${i + 1}</cProd><xProd>ITEM</xProd><vProd>10.00</vProd></prod>` +
+          '<imposto><IBSCBS>' +
+          (item.cst ? `<CST>${item.cst}</CST>` : '') +
+          (item.cClassTrib ? `<cClassTrib>${item.cClassTrib}</cClassTrib>` : '') +
+          '</IBSCBS></imposto></det>'
+      )
+      .join('');
+    return fs.readFileSync(NOTA1, 'utf-8').replace(/<det [\s\S]*<\/det>/, det);
+  }
+
+  it('guarda o par de cada item da NF-e', async () => {
+    const doc = await nfeParserService.parseNFE(
+      nfeComReforma([
+        { cst: '000', cClassTrib: '000001' },
+        { cst: '200' },
+      ])
+    );
+    expect(doc.reformaItens).toEqual([
+      { cst: '000', cClassTrib: '000001' },
+      { cst: '200', cClassTrib: undefined },
+    ]);
+    expect(doc.semDataEmissao).toBe(false);
+  });
+
+  it('marca a NF-e sem dhEmi nem dEmi', async () => {
+    const xml = fs.readFileSync(NOTA1, 'utf-8').replace(/<dhEmi>[^<]*<\/dhEmi>/, '');
+    const doc = await nfeParserService.parseNFE(xml);
+    expect(doc.semDataEmissao).toBe(true);
+  });
+
+  const comData = (tag: string) =>
+    fs.readFileSync(NOTA1, 'utf-8').replace(/<dhEmi>[^<]*<\/dhEmi>/, tag);
+
+  it('dEmi 2026-01-01 é do dia 01/01/2026, dentro do período', async () => {
+    const doc = await nfeParserService.parseNFE(comData('<dEmi>2026-01-01</dEmi>'));
+    expect(doc.semDataEmissao).toBe(false);
+    expect(doc.diaEmissao).toBe('2026-01-01');
+    expect(conferirReforma(doc, tabelaCarregada()).situacao).not.toBe('fora do período');
+  });
+
+  it('dhEmi de 23h30 de 31/12/2025 em -04:00 é fora do período', async () => {
+    const doc = await nfeParserService.parseNFE(
+      comData('<dhEmi>2025-12-31T23:30:00-04:00</dhEmi>')
+    );
+    expect(doc.diaEmissao).toBe('2025-12-31');
+    expect(conferirReforma(doc, tabelaCarregada()).situacao).toBe('fora do período');
+  });
+
+  it('dhEmi malformado deixa a nota sem data em vez de recusá-la', async () => {
+    const doc = await nfeParserService.parseNFE(
+      comData('<dhEmi>2026-02-30T10:00:00-03:00</dhEmi>')
+    );
+    expect(doc.semDataEmissao).toBe(true);
+    expect(doc.diaEmissao).toBeUndefined();
+    expect(conferirReforma(doc, tabelaCarregada()).situacao).toBe('sem data');
+  });
+
+  it('guarda o par da nota no CT-e', async () => {
+    const xml = CTE_CARGA.replace(
+      '</ICMS>',
+      '</ICMS><IBSCBS><CST>000</CST><cClassTrib>000001</cClassTrib></IBSCBS>'
+    );
+    const doc = await nfeParserService.parseNFE(xml);
+    expect(doc.reformaItens).toEqual([{ cst: '000', cClassTrib: '000001' }]);
+    expect(doc.semDataEmissao).toBe(false);
+  });
+
+  it('marca o CT-e sem data', async () => {
+    const doc = await nfeParserService.parseNFE(CTE_CARGA.replace(/<dhEmi>[^<]*<\/dhEmi>/, ''));
+    expect(doc.semDataEmissao).toBe(true);
+  });
+
+  it('na NFS-e prefere o CST do grupo IBSCBS ao de outro tributo', async () => {
+    const xml = NFSE.replace(
+      '<BaseCalculo>1000.00</BaseCalculo>',
+      '<BaseCalculo>1000.00</BaseCalculo>' +
+        '<PisCofins><CST>01</CST></PisCofins>' +
+        '<IBSCBS><CST>200</CST><cClassTrib>200002</cClassTrib></IBSCBS>'
+    );
+    const doc = await nfeParserService.parseNFE(xml);
+    expect(doc.reformaItens).toEqual([{ cst: '200', cClassTrib: '200002' }]);
+    expect(doc.camposTributarios?.find(c => c.grupo === 'reforma' && c.campo === 'CST')?.valor).toBe('200');
+  });
+
+  it('marca a NFS-e sem data', async () => {
+    const doc = await nfeParserService.parseNFE(NFSE.replace(/<DataEmissaoNfse>[^<]*<\/DataEmissaoNfse>/, ''));
+    expect(doc.semDataEmissao).toBe(true);
+    expect(doc.reformaItens).toEqual([{ cst: undefined, cClassTrib: undefined }]);
+  });
+});
+
+describe('parseNFE: casos de revisão da reforma', () => {
+  it('lê CST e cClassTrib do CT-e aninhados em IBSCBS > gIBSCBS', async () => {
+    const xml = CTE_CARGA.replace(
+      '</ICMS>',
+      '</ICMS><IBSCBS><gIBSCBS><CST>200</CST><cClassTrib>200002</cClassTrib>' +
+        '<vBC>500.00</vBC></gIBSCBS></IBSCBS>'
+    );
+    const doc = await nfeParserService.parseNFE(xml);
+    expect(doc.reformaItens).toEqual([{ cst: '200', cClassTrib: '200002' }]);
+  });
+
+  it('NFS-e com CST de PIS/COFINS e sem grupo IBSCBS fica sem CST do IBS/CBS', async () => {
+    const xml = NFSE.replace(
+      '<BaseCalculo>1000.00</BaseCalculo>',
+      '<BaseCalculo>1000.00</BaseCalculo><PisCofins><CST>01</CST></PisCofins>'
+    );
+    const doc = await nfeParserService.parseNFE(xml);
+    expect(doc.reformaItens).toEqual([{ cst: undefined, cClassTrib: undefined }]);
+    expect(
+      doc.camposTributarios?.find(c => c.grupo === 'reforma' && c.campo === 'CST')?.situacao
+    ).toBe('ausente');
+  });
+
+  it('NFS-e com 31/02/2026 fica sem data', async () => {
+    const doc = await nfeParserService.parseNFE(
+      NFSE.replace('2026-02-12T10:00:00', '31/02/2026')
+    );
+    expect(doc.semDataEmissao).toBe(true);
+    expect(conferirReforma(doc, tabelaCarregada()).situacao).toBe('sem data');
+  });
+
+  it('NFS-e não usa dhProc como data de emissão', async () => {
+    const doc = await nfeParserService.parseNFE(
+      NFSE.replace(
+        '<DataEmissaoNfse>2026-02-12T10:00:00</DataEmissaoNfse>',
+        '<dhProc>2026-02-12T10:00:00</dhProc>'
+      )
+    );
+    expect(doc.semDataEmissao).toBe(true);
+  });
+
+  it('NFS-e guarda o dia local da emissão', async () => {
+    const doc = await nfeParserService.parseNFE(NFSE);
+    expect(doc.diaEmissao).toBe('2026-02-12');
   });
 });

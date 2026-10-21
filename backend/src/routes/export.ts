@@ -39,7 +39,8 @@ router.get('/excel', authenticate, async (req: Request, res: Response) => {
       });
     }
 
-    const documentos = filtrarDocumentos(doLote, lerFiltros(req.query));
+    const filtros = lerFiltros(req.query);
+    const documentos = filtrarDocumentos(doLote, filtros);
 
     if (documentos.length === 0) {
       return res.status(400).json({
@@ -53,8 +54,12 @@ router.get('/excel', authenticate, async (req: Request, res: Response) => {
     const dashboard = await dashboardService.generateDashboard(documentos);
 
     // Exportar para Excel
-    const temEmpresa = !!sessionService.obterSessao(sessionId)?.empresa;
-    const buffer = excelExportService.exportarDados(documentos, dashboard, temEmpresa);
+    const empresa = sessionService.obterSessao(sessionId)?.empresa;
+    const temEmpresa = !!empresa;
+    const buffer = excelExportService.exportarDados(documentos, dashboard, temEmpresa, {
+      filtros,
+      empresa,
+    });
 
     // Enviar arquivo
     const filename = `nfe-analise-${new Date().getTime()}.xlsx`;

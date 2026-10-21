@@ -7,6 +7,7 @@ import { config } from '../config';
 import { sessionService } from '../services/session';
 import { NFeDocument } from '../types';
 import exportRoutes from './export';
+import { conferirCamposNFe } from '../services/camposTributarios';
 
 const USUARIO = 'teste-export';
 const EMPRESA = '11111111000111';
@@ -82,8 +83,11 @@ afterAll(done => {
   servidor.close(done);
 });
 
-async function baixarPlanilha(query: string): Promise<XLSX.WorkBook> {
-  const resposta = await fetch(`${base}/excel${query}`, { headers: cabecalhos });
+async function baixarPlanilha(
+  query: string,
+  comCabecalhos: Record<string, string> = cabecalhos
+): Promise<XLSX.WorkBook> {
+  const resposta = await fetch(`${base}/excel${query}`, { headers: comCabecalhos });
   expect(resposta.status).toBe(200);
   const livro = XLSX.read(Buffer.from(await resposta.arrayBuffer()), { type: 'buffer' });
   expect(livro.SheetNames).not.toContain('Transição 2024-2027');
@@ -125,5 +129,127 @@ describe('GET /export/excel com filtros', () => {
     const corpo = (await resposta.json()) as any;
     expect(resposta.status).toBe(400);
     expect(corpo.error).toBe('Nenhuma nota com os filtros escolhidos');
+  });
+});
+
+describe('GET /export/excel: abas da reforma', () => {
+  it('traz as abas novas com cabeçalho de empresa, filtros e tabela', async () => {
+    const livro = await baixarPlanilha('?sentido=entrada&cfop=1102');
+    expect(livro.SheetNames).toEqual(
+      expect.arrayContaining(['Pendências da reforma', 'Consolidado por campo'])
+    );
+
+    const pendencias = linhas(livro, 'Pendências da reforma');
+    const rotulo = (r: string) => pendencias.find(l => l[0] === r)?.[1];
+    expect(rotulo('Empresa analisada')).toBe('EMPRESA (11.111.111/0001-11)');
+    expect(rotulo('Entrada/Saída')).toBe('Entradas');
+    expect(rotulo('CFOP')).toBe('1102');
+    expect(rotulo('NCM')).toBe('Todos');
+    expect(rotulo('Tabela de cClassTrib')).toMatch(/^v\d/);
+  });
+
+  it('lista por nota as pendências do recorte, só entradas', async () => {
+    const livro = await baixarPlanilha('?sentido=entrada');
+    const pendencias = linhas(livro, 'Pendências da reforma');
+    const inicio = pendencias.findIndex(l => l[0] === 'Sentido');
+    const notas = pendencias.slice(inicio + 1);
+
+    expect(notas).toHaveLength(2);
+    expect(notas.every(l => l[0] === 'Entrada')).toBe(true);
+    // As notas de teste não trazem nenhum campo da reforma
+    expect(notas[0][8]).toContain('CBS');
+    expect(notas[0][7]).toBe('com pendência');
+  });
+
+  it('consolida quantas notas têm cada problema', async () => {
+    const livro = await baixarPlanilha('');
+    const consolidado = linhas(livro, 'Consolidado por campo');
+    const linha = (r: string) => consolidado.find(l => l[0] === r);
+
+    expect(linha('Notas exigíveis')?.slice(1, 5)).toEqual([2, 1, 0, 3]);
+    expect(linha('Notas completas')?.slice(1, 5)).toEqual([0, 0, 0, 0]);
+    expect(linha('CBS')?.slice(1, 5)).toEqual([2, 1, 0, 3]);
+    expect(linha('cClassTrib incompatível com o CST')?.slice(1, 5)).toEqual([0, 0, 0, 0]);
+  });
+
+  it('com filtro de entradas, o consolidado só conta entradas', async () => {
+    const livro = await baixarPlanilha('?sentido=entrada');
+    const consolidado = linhas(livro, 'Consolidado por campo');
+    expect(consolidado.find(l => l[0] === 'CBS')?.slice(1, 5)).toEqual([2, 0, 0, 2]);
+  });
+});
+
+describe('GET /export/excel: períodos, avisos e ordem', () => {
+  const SESSAO2 = `sess-${USUARIO}-2`;
+  const cabecalhos2 = { Authorization: `Bearer ${token}`, 'x-session-id': SESSAO2 };
+  const ITEM = {
+    cstReforma: '000', cClassTrib: '000099', baseIBSCBS: '100.00', ibsEstadual: '0.10',
+    ibsMunicipal: '0.00', cbs: '0.90',
+  };
+
+  beforeAll(async () => {
+    const documentos: NFeDocument[] = [
+      // Saída completa, com cClassTrib fora da tabela carregada: aviso
+      {
+        ...nota('saida-completa-aviso', EMPRESA, OUTRO, ['5102']),
+        camposTributarios: conferirCamposNFe([ITEM]),
+        reformaItens: [{ cst: '000', cClassTrib: '000099' }],
+        diaEmissao: '2026-02-01',
+      },
+      nota('saida-pendente', EMPRESA, OUTRO, ['5102']),
+      nota('entrada-pendente', OUTRO, EMPRESA, ['1102']),
+      { ...nota('entrada-sem-data', OUTRO, EMPRESA, ['1102']), semDataEmissao: true },
+      {
+        ...nota('entrada-2025', OUTRO, EMPRESA, ['1102']),
+        dataEmissao: '2025-06-01T13:00:00.000Z',
+        diaEmissao: '2025-06-01',
+      },
+    ];
+    sessionService.criarOuRecuperarSessao(SESSAO2, USUARIO, 'teste@exemplo.com');
+    await sessionService.adicionarDocumentos(
+      SESSAO2,
+      documentos,
+      {
+        sessionId: SESSAO2,
+        quantidadeArquivos: documentos.length,
+        arquivosProcessados: documentos.length,
+        arquivosComErro: 0,
+        erros: [],
+        documentos,
+        timestamp: new Date().toISOString(),
+      },
+      { cnpj: EMPRESA, nome: 'EMPRESA', inferida: true }
+    );
+  });
+
+  async function notasDasPendencias(): Promise<any[][]> {
+    const pendencias = linhas(await baixarPlanilha('', cabecalhos2), 'Pendências da reforma');
+    return pendencias.slice(pendencias.findIndex(l => l[0] === 'Sentido') + 1);
+  }
+
+  it('deixa de fora as notas sem data e de 2025', async () => {
+    const chaves = (await notasDasPendencias()).map(l => l[2]);
+    expect(chaves).not.toContain('chave-entrada-sem-data');
+    expect(chaves).not.toContain('chave-entrada-2025');
+  });
+
+  it('inclui a nota completa que tem aviso', async () => {
+    const linha = (await notasDasPendencias()).find(l => l[2] === 'chave-saida-completa-aviso');
+    expect(linha?.[7]).toBe('completa');
+    expect(linha?.[9]).toContain('não consta na tabela carregada');
+    expect(linha?.[3]).toBe('01/02/2026');
+  });
+
+  it('sem filtro de sentido, entradas vêm antes das saídas', async () => {
+    expect((await notasDasPendencias()).map(l => l[0])).toEqual(['Entrada', 'Saída', 'Saída']);
+  });
+
+  it('o consolidado conta fora do período e sem data, com o percentual total', async () => {
+    const consolidado = linhas(await baixarPlanilha('', cabecalhos2), 'Consolidado por campo');
+    const linha = (r: string) => consolidado.find(l => String(l[0]).startsWith(r));
+    expect(linha('Fora do período')?.[4]).toBe(1);
+    expect(linha('Fora do período')?.[0]).toBe('Fora do período (antes de 01/01/2026)');
+    expect(linha('Sem data de emissão')?.[4]).toBe(1);
+    expect(linha('Percentual de completas')?.slice(1, 5)).toEqual(['0%', '50%', '0%', '33.3%']);
   });
 });

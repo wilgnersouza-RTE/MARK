@@ -125,6 +125,30 @@ export interface NFeDocument {
   cfops: string[];
   /** NCMs distintos dos itens. Só NF-e e NFC-e têm NCM; vazio nos demais. */
   ncms: string[];
+  /**
+   * Pares CST do IBS/CBS e cClassTrib, base da regra de vínculo da reforma.
+   * Um por item na NF-e e NFC-e; um só, o da nota, no CT-e e na NFS-e.
+   * Campo ausente no XML fica undefined.
+   */
+  reformaItens?: ParReforma[];
+  /**
+   * true quando o XML não traz data de emissão (dhEmi, dEmi ou equivalente).
+   * Nesse caso dataEmissao guarda o momento da leitura, que não serve para
+   * a data de corte da reforma.
+   */
+  semDataEmissao?: boolean;
+  /**
+   * Dia de emissão (AAAA-MM-DD) no fuso do próprio emitente, tirado do texto
+   * do XML. É ele que decide a data de corte da reforma. Ausente quando a
+   * nota não tem data válida.
+   */
+  diaEmissao?: string;
+}
+
+/** CST do IBS/CBS e cClassTrib declarados num item (ou na nota). */
+export interface ParReforma {
+  cst?: string;
+  cClassTrib?: string;
 }
 
 /**
