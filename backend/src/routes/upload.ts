@@ -1,12 +1,17 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
-import JSZip from 'jszip';
 import { authenticate } from '../middleware/auth';
-import { nfeParserService } from '../services/nfeParser';
 import { sessionService, ErroEmpresaForaDoLote } from '../services/session';
-import { ImportacaoArquivo, ErroProcessamento, NFeDocument, UserSession } from '../types';
-import { MODELOS_DOCUMENTO, rotuloModelo } from '../utils/modelos';
-import { contarPorSentido, identificarEmpresa } from '../utils/sentidoImportacao';
+import { ImportacaoArquivo } from '../types';
+import { identificarEmpresa } from '../utils/sentidoImportacao';
+import {
+  ErroZipInvalido,
+  LoteLido,
+  atualizarAposTrocaEmpresa,
+  lerLoteZip,
+  resumoDoLote,
+  salvarAposUpload,
+} from '../services/analises';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -27,41 +32,6 @@ const upload = multer({
 });
 
 /**
- * Resumo do lote vigente da sessão: contagem por modelo e por sentido,
- * empresa analisada e CNPJs que o contador pode escolher.
- *
- * Usado pelo upload e pela troca de empresa, para a tela receber sempre o
- * mesmo formato.
- */
-function resumoDoLote(sessao: UserSession) {
-  const documentos = sessao.documentos;
-
-  const porModelo = MODELOS_DOCUMENTO.map(m => ({
-    modelo: String(m.codigo),
-    rotulo: rotuloModelo(m.codigo),
-    quantidade: documentos.filter(d => String(d.modelo) === String(m.codigo)).length,
-  })).filter(m => m.quantidade > 0);
-
-  const { candidatos } = identificarEmpresa(documentos);
-
-  return {
-    porModelo,
-    porSentido: contarPorSentido(documentos),
-    empresa: sessao.empresa ?? null,
-    candidatosEmpresa: candidatos,
-    precisaEscolherEmpresa: !sessao.empresa,
-    documentos: documentos.map((d: NFeDocument) => ({
-      id: d.id,
-      modelo: d.modelo,
-      tipo: d.tipo,
-      chaveNFe: d.chaveNFe,
-      cnpjEmitente: d.cnpjEmitente,
-      cnpjDestino: d.cnpjDestino,
-    })),
-  };
-}
-
-/**
  * POST /api/v1/upload/nfe
  * Processa um ZIP com XMLs de NF-e, NFC-e, CT-e, CT-e OS e NFS-e misturados.
  *
@@ -69,10 +39,6 @@ function resumoDoLote(sessao: UserSession) {
  * sentido sai da empresa analisada, identificada pelo próprio lote.
  */
 router.post('/nfe', authenticate, upload.single('file'), async (req: Request, res: Response) => {
-  let arquivosProcessados = 0;
-  let arquivosComErro = 0;
-  const erros: ErroProcessamento[] = [];
-
   try {
     const sessionId = req.sessionId || (req.headers['x-session-id'] as string);
 
@@ -101,57 +67,19 @@ router.post('/nfe', authenticate, upload.single('file'), async (req: Request, re
       req.user?.email || ''
     );
 
-    // Processar ZIP
-    const zip = new JSZip();
-    const zipContent = await zip.loadAsync(req.file.buffer);
-
-    const documentos: NFeDocument[] = [];
-
-    // Iterar sobre arquivos do ZIP
-    for (const [nomeArquivo, file] of Object.entries(zipContent.files)) {
-      // Pular pastas
-      if (file.dir) continue;
-
-      // Processar apenas XMLs
-      if (!nomeArquivo.toLowerCase().endsWith('.xml')) {
-        continue;
-      }
-
-      try {
-        const conteudoXML = await file.async('text');
-
-        // Verificar se o XML contém alguma tag de valor reconhecível.
-        // As três primeiras são da NF-e; as demais, das notas de serviço —
-        // cada município nomeia a sua de um jeito, e sem elas aqui a NFS-e
-        // era barrada antes mesmo de chegar ao parser.
-        const marcasDeValor = [
-          'vBC', 'vICMS', 'vNF',
-          'ValorServicos', 'ValoresNFSe', 'vServ', 'ValorLiquidoNfse', 'ValorIss', 'ValorISS',
-          // CT-e: o valor do frete vive em <vPrest>.
-          'vTPrest', 'vPrest',
-        ];
-
-        if (!marcasDeValor.some(m => conteudoXML.includes(m))) {
-          erros.push({
-            nomeArquivo,
-            erro: 'XML não contém valores de nota fiscal',
-          });
-          arquivosComErro++;
-          continue;
-        }
-
-        const documento = await nfeParserService.parseNFE(conteudoXML);
-
-        documentos.push(documento);
-        arquivosProcessados++;
-      } catch (erro: any) {
-        erros.push({
-          nomeArquivo,
-          erro: erro.message,
-        });
-        arquivosComErro++;
-      }
+    // Processar ZIP: cada XML pelo parser; o que não é nota vai para erros.
+    let lote: LoteLido;
+    try {
+      lote = await lerLoteZip(req.file.buffer);
+    } catch (erro: any) {
+      return res.status(400).json({
+        success: false,
+        error: erro instanceof ErroZipInvalido ? erro.message : 'Erro ao processar arquivo ZIP',
+        timestamp: new Date().toISOString(),
+      });
     }
+
+    const { documentos, erros, arquivosProcessados, arquivosComErro, quantidadeArquivos } = lote;
 
     if (documentos.length === 0) {
       return res.status(400).json({
@@ -172,7 +100,7 @@ router.post('/nfe', authenticate, upload.single('file'), async (req: Request, re
     // Criar registro de importação
     const importacao: ImportacaoArquivo = {
       sessionId,
-      quantidadeArquivos: Object.keys(zipContent.files).length,
+      quantidadeArquivos,
       arquivosProcessados,
       arquivosComErro,
       erros,
@@ -192,6 +120,15 @@ router.post('/nfe', authenticate, upload.single('file'), async (req: Request, re
       empresa
     );
 
+    // Salva a análise (resultado por nota e ZIP). Falha não derruba o
+    // upload: o lote segue na sessão e a tela avisa que não foi salvo.
+    const salvamento = await salvarAposUpload(atualizada, {
+      zip: req.file.buffer,
+      criadoPor: req.user?.email || req.user?.userId || 'desconhecido',
+      lote: { erros, arquivosProcessados, arquivosComErro, quantidadeArquivos },
+      nomeArquivo: req.file.originalname,
+    });
+
     res.json({
       success: true,
       data: {
@@ -208,6 +145,7 @@ router.post('/nfe', authenticate, upload.single('file'), async (req: Request, re
           /** Quantidade descartada da importação anterior, se houver */
           documentosSubstituidos: documentosAnteriores,
           ...resumoDoLote(atualizada),
+          ...salvamento,
         },
         erros: erros.length > 0 ? erros : undefined,
       },
@@ -255,12 +193,16 @@ router.post('/empresa', authenticate, async (req: Request, res: Response) => {
 
     const atualizada = await sessionService.definirEmpresa(sessionId, cnpj);
 
+    // Leva a escolha para a análise salva, sem derrubar a troca se falhar.
+    const salvamento = await atualizarAposTrocaEmpresa(atualizada, req.user?.email || req.user?.userId);
+
     res.json({
       success: true,
       data: {
         importacao: {
           totalDocumentosSessao: atualizada.documentos.length,
           ...resumoDoLote(atualizada),
+          ...salvamento,
         },
       },
       timestamp: new Date().toISOString(),

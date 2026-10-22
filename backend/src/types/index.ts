@@ -365,4 +365,14 @@ export interface UserSession {
   importacoes: ImportacaoArquivo[];
   /** Empresa analisada no lote vigente; ausente enquanto não identificada */
   empresa?: EmpresaAnalisada;
+  /** Análise salva que corresponde ao lote vigente, quando foi salva */
+  analiseId?: string;
+  /**
+   * De onde veio a análise ligada: 'upload' quando esta sessão a criou
+   * (importação ou troca de empresa), 'aberta' quando foi aberta da lista.
+   * Só a criada pela sessão pode ser atualizada no lugar.
+   */
+  analiseOrigem?: 'upload' | 'aberta';
+  /** Muda a cada lote carregado; diz se o lote ainda é o mesmo depois de um await */
+  loteId?: string;
 }

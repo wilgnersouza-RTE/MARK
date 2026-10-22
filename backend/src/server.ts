@@ -13,8 +13,13 @@ import dashboardRouter from './routes/dashboard';
 import exportRouter from './routes/export';
 import taxRouter from './routes/tax';
 import rtcRouter from './routes/rtc';
+import analisesRouter from './routes/analises';
+import { armazenamentoAnalises } from './services/analises';
 
 validateConfig();
+
+// Escolhe já na subida onde as análises ficam, para o log mostrar.
+armazenamentoAnalises();
 
 /**
  * Decide quais origens o navegador pode usar para chamar esta API.
@@ -106,6 +111,7 @@ app.use('/api/v1/dashboard', dashboardRouter);
 app.use('/api/v1/export', exportRouter);
 app.use('/api/v1/tax', taxRouter);
 app.use('/api/v1/rtc', rtcRouter);
+app.use('/api/v1/analises', analisesRouter);
 
 // ==================== 404 Handler ====================
 app.use((req, res) => {
