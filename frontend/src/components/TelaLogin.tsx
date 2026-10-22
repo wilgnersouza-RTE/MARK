@@ -1,7 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { Eye, EyeOff, ArrowLeft, CheckCircle, Loader2 } from 'lucide-react';
-import { API_URL, mensagemDeFalhaDeRede } from '../utils/api';
+import {
+  API_URL,
+  aguardarServidor,
+  ehAmbienteDeDesenvolvimento,
+  ehFalhaDeRede,
+  mensagemDeFalhaDeRede,
+  servidorResponde,
+} from '../utils/api';
 import { MarcaRTE } from './Marca';
 
 
@@ -51,18 +58,36 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
   const [erro, setErro] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const [primeiroAcesso, setPrimeiroAcesso] = useState(false);
+  // O servidor ainda está acordando (hibernação do plano gratuito)
+  const [acordando, setAcordando] = useState(false);
 
-  // Instalação nova, sem nenhum usuário: a tela abre já em "criar conta"
+  // Ao abrir a tela, acorda o servidor em segundo plano. Se ele não responde
+  // logo, avisa que está iniciando e espera, em vez de deixar o primeiro
+  // "Entrar" bater num servidor desligado. Depois confere se é instalação
+  // nova, sem nenhum usuário: nesse caso a tela abre já em "criar conta".
   useEffect(() => {
-    axios
-      .get(`${API_URL}/api/v1/auth/status`)
-      .then(r => {
-        if (!r.data.data.possuiUsuarios) {
+    let ativo = true;
+    (async () => {
+      if (!(await servidorResponde(4_000))) {
+        if (!ativo) return;
+        setAcordando(true);
+        await aguardarServidor();
+        if (!ativo) return;
+        setAcordando(false);
+      }
+      try {
+        const r = await axios.get(`${API_URL}/api/v1/auth/status`);
+        if (ativo && !r.data.data.possuiUsuarios) {
           setPrimeiroAcesso(true);
           setTela('criar');
         }
-      })
-      .catch(() => undefined);
+      } catch {
+        // Sem status a tela segue em "entrar"; o erro aparece se o login falhar.
+      }
+    })();
+    return () => {
+      ativo = false;
+    };
   }, []);
 
   // Depois de alguns segundos carregando, avisa que o servidor pode estar
@@ -82,6 +107,26 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
   };
 
   /**
+   * Executa a chamada; se não houver resposta do servidor fora do ambiente de
+   * desenvolvimento, espera ele acordar e tenta uma vez mais. Em produção a
+   * falha de rede quase sempre é a hibernação do plano gratuito.
+   */
+  const comServidor = async <T,>(chamada: () => Promise<T>): Promise<T> => {
+    try {
+      return await chamada();
+    } catch (e: any) {
+      if (!ehFalhaDeRede(e) || ehAmbienteDeDesenvolvimento()) throw e;
+      setAcordando(true);
+      try {
+        if (!(await aguardarServidor())) throw e;
+      } finally {
+        setAcordando(false);
+      }
+      return chamada();
+    }
+  };
+
+  /**
    * Traduz a falha do axios em algo acionável.
    *
    * Sem isso, qualquer problema virava "não foi possível criar a conta", que
@@ -91,7 +136,7 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
   const descreverErro = (e: any, acaoPadrao: string): string => {
     if (e.response?.data?.error) return e.response.data.error;
 
-    if (e.code === 'ERR_NETWORK' || !e.response) {
+    if (ehFalhaDeRede(e)) {
       return mensagemDeFalhaDeRede();
     }
 
@@ -106,7 +151,9 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
     setCarregando(true);
     limparMensagens();
     try {
-      const r = await axios.post(`${API_URL}/api/v1/auth/login`, { email, password: senha });
+      const r = await comServidor(() =>
+        axios.post(`${API_URL}/api/v1/auth/login`, { email, password: senha })
+      );
       onAutenticado(r.data.data);
     } catch (e: any) {
       setErro(descreverErro(e, 'Não foi possível entrar.'));
@@ -119,11 +166,13 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
     setCarregando(true);
     limparMensagens();
     try {
-      const r = await axios.post(`${API_URL}/api/v1/auth/register`, {
-        email,
-        password: senha,
-        nome,
-      });
+      const r = await comServidor(() =>
+        axios.post(`${API_URL}/api/v1/auth/register`, {
+          email,
+          password: senha,
+          nome,
+        })
+      );
       onAutenticado(r.data.data);
     } catch (e: any) {
       setErro(descreverErro(e, 'Não foi possível criar a conta.'));
@@ -136,7 +185,9 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
     setCarregando(true);
     limparMensagens();
     try {
-      const r = await axios.post(`${API_URL}/api/v1/auth/esqueci-senha`, { email });
+      const r = await comServidor(() =>
+        axios.post(`${API_URL}/api/v1/auth/esqueci-senha`, { email })
+      );
       const dados = r.data.data;
 
       if (dados.token) {
@@ -160,7 +211,9 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
     setCarregando(true);
     limparMensagens();
     try {
-      await axios.post(`${API_URL}/api/v1/auth/redefinir-senha`, { token, novaSenha });
+      await comServidor(() =>
+        axios.post(`${API_URL}/api/v1/auth/redefinir-senha`, { token, novaSenha })
+      );
       setAviso('Senha redefinida. Faça login com a nova senha.');
       setSenha('');
       setTela('entrar');
@@ -208,7 +261,20 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
           </div>
 
           <div className="rounded-xl border border-fundo-borda bg-fundo-card p-8 shadow-sm">
-            {erro && (
+            {acordando && (
+              <div
+                role="status"
+                className="mb-5 flex items-center gap-2 rounded-md border border-marca-azul/40 bg-marca-azul/5 px-4 py-3 text-sm text-rotulo"
+              >
+                <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-marca-azul border-t-transparent" />
+                <span className="leading-snug">
+                  Iniciando o servidor, aguarde alguns segundos… Isso acontece no
+                  primeiro acesso após um período sem uso e leva até 1 minuto.
+                </span>
+              </div>
+            )}
+
+            {erro && !acordando && (
               <div className="mb-5 rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm leading-snug text-red-700">
                 {erro}
               </div>
@@ -328,7 +394,7 @@ export const TelaLogin: React.FC<Props> = ({ onAutenticado }) => {
               </button>
             </form>
 
-            {demorando && carregando && (
+            {demorando && carregando && !acordando && (
               <p className="mt-3 text-center text-xs leading-snug text-tinta-media">
                 O servidor pode estar iniciando após período ocioso. A primeira
                 requisição costuma levar até 30 segundos.
