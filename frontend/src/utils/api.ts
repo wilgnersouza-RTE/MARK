@@ -60,10 +60,64 @@ export const API_URL = resolverURL();
 axios.defaults.timeout = 60_000;
 
 /**
+ * App rodando na máquina do desenvolvedor (localhost) ou num ambiente de
+ * desenvolvimento remoto (Codespaces, Gitpod). Fora disso é produção, onde as
+ * instruções de "npm run dev" não fazem sentido para quem usa o sistema.
+ */
+export function ehAmbienteDeDesenvolvimento(): boolean {
+  if (typeof window === 'undefined') return true;
+  const { hostname } = window.location;
+  return (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    /app\.github\.dev|githubpreview\.dev|gitpod\.io/.test(hostname)
+  );
+}
+
+/** Responde se o backend está de pé, sem lançar erro. */
+export async function servidorResponde(limiteMs = 5_000): Promise<boolean> {
+  try {
+    const r = await axios.get(`${API_URL}/health`, { timeout: limiteMs });
+    return r.status === 200;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Espera o backend acordar. No plano gratuito do Render o serviço hiberna após
+ * ~15 minutos sem uso e o primeiro acesso leva de 30 s a 1 min: em vez de
+ * mostrar erro, tenta de novo a cada `intervaloMs` até `limiteMs`.
+ */
+export async function aguardarServidor(
+  limiteMs = 90_000,
+  intervaloMs = 3_000
+): Promise<boolean> {
+  const fim = Date.now() + limiteMs;
+  while (Date.now() < fim) {
+    if (await servidorResponde(Math.min(10_000, fim - Date.now()))) return true;
+    await new Promise(resolve => setTimeout(resolve, intervaloMs));
+  }
+  return false;
+}
+
+/** A falha foi de rede (sem resposta do servidor), e não um erro devolvido por ele. */
+export function ehFalhaDeRede(e: any): boolean {
+  return e?.code === 'ERR_NETWORK' || e?.code === 'ECONNABORTED' || !e?.response;
+}
+
+/**
  * Mensagem de erro útil para falha de rede, citando a URL que foi tentada e o
- * que costuma ser a causa em ambiente remoto.
+ * que costuma ser a causa em cada ambiente.
  */
 export function mensagemDeFalhaDeRede(): string {
+  if (!ehAmbienteDeDesenvolvimento()) {
+    return (
+      'O servidor não respondeu. Ele pode estar iniciando após um período sem uso, ' +
+      'o que leva até 1 minuto. Aguarde alguns instantes e tente de novo.'
+    );
+  }
+
   const emCodespaces =
     typeof window !== 'undefined' && /app\.github\.dev|gitpod\.io/.test(window.location.hostname);
 
