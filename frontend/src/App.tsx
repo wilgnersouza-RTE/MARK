@@ -20,6 +20,7 @@ import {
 import { AbaAdministracao } from './components/AbaAdministracao';
 import { TelaLogin } from './components/TelaLogin';
 import { PainelExecutivo } from './components/PainelExecutivo';
+import { AnalisesSalvas, rotuloCompetencia } from './components/AnalisesSalvas';
 import { API_URL } from './utils/api';
 import {
   FiltrosAnalise,
@@ -52,6 +53,17 @@ interface ResumoLote {
   empresa: { cnpj: string; nome: string; inferida: boolean } | null;
   candidatosEmpresa: CandidatoEmpresa[];
   precisaEscolherEmpresa: boolean;
+  /** Análise salva do lote, quando o armazenamento respondeu */
+  analise?: {
+    id: string;
+    empresaNome: string | null;
+    competencia: string;
+    versao: number;
+  } | null;
+  /** false quando a análise não pôde ser salva (ou a troca não foi gravada) */
+  analiseSalva?: boolean;
+  /** Orientação para a tela quando a análise não foi salva */
+  avisoAnalise?: string;
 }
 
 
@@ -329,21 +341,35 @@ const StatCard: React.FC<{
   </Card>
 );
 
+/**
+ * Teto do upload e da troca de empresa. O backend espera até 180 s pelo ZIP
+ * na Supabase e 30 s por requisição de notas (em lotes de 200); o navegador
+ * precisa esperar mais que isso, senão desiste de uma gravação em andamento.
+ */
+const TEMPO_GRAVACAO_MS = 20 * 60 * 1000;
+
 // Upload Section
 const UploadSection: React.FC<{
   sessionId: string;
   token: string;
   onUploadSuccess: () => Promise<void>;
-}> = ({ sessionId, token, onUploadSuccess }) => {
+  /** Lote de uma análise salva aberta, mostrado como se fosse o upload */
+  loteInicial?: ResumoLote | null;
+  rejeitadosIniciais?: ArquivoRejeitado[];
+  /** Avisa qual análise salva está no painel e se o lote ficou sem salvar */
+  onLoteMudou?: (info: { analiseId: string | null; naoSalvo: boolean }) => void;
+}> = ({ sessionId, token, onUploadSuccess, loteInicial = null, rejeitadosIniciais = [], onLoteMudou }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   // Arquivos do ZIP que não puderam ser lidos, com o motivo.
-  const [rejeitados, setRejeitados] = useState<ArquivoRejeitado[]>([]);
+  const [rejeitados, setRejeitados] = useState<ArquivoRejeitado[]>(rejeitadosIniciais);
   const [baixandoErros, setBaixandoErros] = useState(false);
   // Quantos documentos da importação anterior foram descartados.
   const [substituidos, setSubstituidos] = useState(0);
   // Resumo do lote vigente: modelos, sentidos e empresa analisada.
-  const [lote, setLote] = useState<ResumoLote | null>(null);
+  const [lote, setLote] = useState<ResumoLote | null>(loteInicial);
+  // Aviso de que a análise não foi salva (upload ou troca de empresa).
+  const [avisoAnalise, setAvisoAnalise] = useState<string | null>(null);
   const [arrastando, setArrastando] = useState(false);
   // Lista de CNPJs aberta pelo botão "Alterar".
   const [alterandoEmpresa, setAlterandoEmpresa] = useState(false);
@@ -361,11 +387,25 @@ const UploadSection: React.FC<{
       const resposta = await axios.post(
         `${API_URL}/api/v1/upload/empresa`,
         { cnpj },
-        { headers: { Authorization: `Bearer ${token}`, 'x-session-id': sessionId } }
+        {
+          headers: { Authorization: `Bearer ${token}`, 'x-session-id': sessionId },
+          // A troca pode gravar uma versão nova, com o ZIP: mesmo teto do upload.
+          timeout: TEMPO_GRAVACAO_MS,
+        }
       );
       const atualizado = resposta.data?.data?.importacao;
       if (atualizado) {
-        setLote(atual => (atual ? { ...atual, ...atualizado } : atualizado));
+        const { analise, analiseSalva, avisoAnalise: aviso, ...resto } = atualizado;
+        if (analiseSalva) {
+          setLote(atual => ({ ...(atual ?? {}), ...resto, analise, analiseSalva: true }));
+          setAvisoAnalise(aviso ?? null);
+        } else {
+          // Não gravou: some a linha "Salva em" e o aviso continua na tela
+          // (o novo, se veio; senão o do upload).
+          setLote(atual => ({ ...(atual ?? {}), ...resto, analise: null, analiseSalva: false }));
+          setAvisoAnalise(anterior => aviso ?? anterior);
+        }
+        onLoteMudou?.({ analiseId: analiseSalva ? analise?.id ?? null : null, naoSalvo: !analiseSalva });
       }
       setAlterandoEmpresa(false);
       await onUploadSuccess();
@@ -419,6 +459,7 @@ const UploadSection: React.FC<{
     setRejeitados([]);
     setSubstituidos(0);
     setLote(null);
+    setAvisoAnalise(null);
     setAlterandoEmpresa(false);
     setErroEmpresa(null);
 
@@ -431,6 +472,8 @@ const UploadSection: React.FC<{
           'x-session-id': sessionId,
           'Authorization': `Bearer ${token}`,
         },
+        // O upload espera o ZIP e as notas chegarem à Supabase.
+        timeout: TEMPO_GRAVACAO_MS,
       });
 
       if (response.data.success) {
@@ -439,6 +482,11 @@ const UploadSection: React.FC<{
         // Antes isso passava em silêncio e o usuário só via o total errado.
         setRejeitados(response.data.data?.erros ?? []);
         setLote(response.data.data?.importacao ?? null);
+        setAvisoAnalise(response.data.data?.importacao?.avisoAnalise ?? null);
+        onLoteMudou?.({
+          analiseId: response.data.data?.importacao?.analise?.id ?? null,
+          naoSalvo: response.data.data?.importacao?.analiseSalva === false,
+        });
         setSubstituidos(response.data.data?.importacao?.documentosSubstituidos ?? 0);
         await onUploadSuccess();
       } else {
@@ -537,6 +585,13 @@ const UploadSection: React.FC<{
 
         {uploadError && <p className="mt-4 text-sm text-red-600">{uploadError}</p>}
 
+        {avisoAnalise && (
+          <p className="mt-4 flex items-start gap-2 rounded-lg border border-amber-400/60 bg-amber-50 px-3 py-2 text-left text-xs text-amber-900">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+            <span>{avisoAnalise}</span>
+          </p>
+        )}
+
         {lote && (
           <div className="mt-4 rounded-lg border border-fundo-borda bg-fundo-card p-4 text-left text-sm">
             <p className="font-semibold text-tinta-forte">
@@ -547,6 +602,12 @@ const UploadSection: React.FC<{
             <p className="mt-1 text-xs text-tinta-media">
               {lote.porModelo.map(m => `${m.rotulo}: ${formatarInteiro(m.quantidade)}`).join(' · ')}
             </p>
+            {lote.analise && (
+              <p className="mt-1 text-xs text-tinta-suave">
+                Salva em Análises salvas: competência {rotuloCompetencia(lote.analise.competencia)} ·
+                versão {lote.analise.versao}
+              </p>
+            )}
 
             <div className="mt-3 flex flex-wrap gap-2">
               <span className="rounded-full bg-marca-azul/10 px-3 py-1 text-xs font-semibold text-marca-azul">
@@ -1242,6 +1303,15 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [appError, setAppError] = useState<string | null>(null);
   const [pagina, setPagina] = useState<'painel' | 'admin'>('painel');
+  // Análise salva aberta: o card de importação é recriado mostrando o lote dela.
+  const [loteAberto, setLoteAberto] = useState<{
+    lote: ResumoLote | null;
+    erros: ArquivoRejeitado[];
+    chave: number;
+  }>({ lote: null, erros: [], chave: 0 });
+  const [analiseAtualId, setAnaliseAtualId] = useState<string | null>(null);
+  // O lote no painel não foi salvo: abrir outra análise o descarta.
+  const [loteNaoSalvo, setLoteNaoSalvo] = useState(false);
 
   /**
    * Troca a sessão pela de outro usuário, a pedido do administrador.
@@ -1360,10 +1430,33 @@ const App: React.FC = () => {
         )}
 
         <UploadSection
+          key={loteAberto.chave}
           sessionId={state.sessionId!}
           token={state.token}
           onUploadSuccess={refreshDashboard}
+          loteInicial={loteAberto.lote}
+          rejeitadosIniciais={loteAberto.erros}
+          onLoteMudou={({ analiseId, naoSalvo }) => {
+            setAnaliseAtualId(analiseId);
+            setLoteNaoSalvo(naoSalvo);
+          }}
         />
+
+        <div className="mt-8">
+          <AnalisesSalvas
+            sessionId={state.sessionId!}
+            token={state.token}
+            versaoLote={versaoLote}
+            analiseAtualId={analiseAtualId}
+            loteAtualNaoSalvo={loteNaoSalvo}
+            onAbrir={async (importacao, erros) => {
+              setLoteAberto(atual => ({ lote: importacao ?? null, erros, chave: atual.chave + 1 }));
+              setAnaliseAtualId(importacao?.analise?.id ?? null);
+              setLoteNaoSalvo(false);
+              await refreshDashboard();
+            }}
+          />
+        </div>
 
         <div className="mt-8">
           <DashboardContent

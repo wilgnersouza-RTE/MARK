@@ -54,20 +54,53 @@ disco em vez de Redis: remova as variáveis `UPSTASH_*`, defina
 somem no próximo deploy — e o backend registra um aviso no log alertando sobre
 isso.
 
+## 1b. Onde guardar as análises salvas
+
+Cada importação vira uma análise salva (resultado por nota e ZIP original),
+numerada por versão dentro de empresa + competência. Elas ficam num projeto
+gratuito da **Supabase** (https://supabase.com):
+
+1. Crie um projeto no plano gratuito, na região **South America (São Paulo)**.
+2. Em **SQL Editor > New query**, cole e rode o conteúdo de
+   `backend/supabase/schema.sql`. Ele cria as tabelas `analises` e
+   `analise_notas` (com RLS ligado e sem políticas públicas) e o bucket
+   privado `lotes`. Pode ser rodado de novo sem perder dados.
+3. Em **Project Settings > API**, copie a **Project URL** e a chave
+   **service_role** (ou a secret key nova, `sb_secret_...`).
+
+Você vai colar no Render, no próximo passo:
+
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+**A chave service_role ignora o RLS e dá acesso total ao projeto.** Ela fica
+só no backend: nunca em variável `VITE_*`, no frontend ou no repositório.
+
+**Projeto pausado:** no plano gratuito, a Supabase pausa o projeto depois de
+uma semana sem uso. A importação continua funcionando, só na sessão, e a tela
+avisa que a análise não foi salva. Para voltar a salvar, abra o projeto no
+painel da Supabase e clique em **Restore project**.
+
+**Sem as variáveis**, as análises ficam em memória e somem a cada deploy ou
+hibernação; o resto do app funciona igual.
+
 ## 2. Backend no Render
 
 1. Suba o projeto para o GitHub.
 2. No Render: **New > Blueprint**, aponte para o repositório. Ele lê o
    `render.yaml` da raiz.
-3. Em **Environment**, cole `UPSTASH_REDIS_REST_URL` e
-   `UPSTASH_REDIS_REST_TOKEN`. Elas estão marcadas como `sync: false` no
-   blueprint justamente para não ficarem no repositório.
+3. Em **Environment**, cole `UPSTASH_REDIS_REST_URL`,
+   `UPSTASH_REDIS_REST_TOKEN`, `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY`.
+   Elas estão marcadas como `sync: false` no blueprint justamente para não
+   ficarem no repositório.
 4. Antes de confirmar, ajuste `CORS_ORIGIN` para a URL real do seu frontend na
    Vercel. **Em produção, apenas as origens listadas aí são aceitas** — é o que
    impede qualquer site de consumir sua API.
 5. No log do primeiro deploy, confirme a linha `✅ Usuários em Redis: ...`. Se
    aparecer `✅ Usuários em arquivo (...)`, as variáveis do Upstash não foram
-   lidas e os cadastros serão perdidos no próximo deploy.
+   lidas e os cadastros serão perdidos no próximo deploy. Confirme também
+   `✅ Análises salvas em Supabase (...)`; se aparecer `Análises salvas em
+   memória`, as variáveis da Supabase não foram lidas.
 
 Ao final você terá uma URL como `https://nfe-validator-api.onrender.com`.
 Teste antes de seguir:

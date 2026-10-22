@@ -17,6 +17,7 @@ export class ErroEmpresaForaDoLote extends Error {
 export class SessionService {
   private sessions: Map<string, UserSession> = new Map();
   private readonly SESSION_TIMEOUT = 24 * 60 * 60 * 1000; // 24 horas
+  private contadorLotes = 0;
 
   /**
    * Cria ou recupera uma sessão
@@ -89,6 +90,10 @@ export class SessionService {
     // as notas ficam com sentido indefinido até o contador escolher.
     sessao.empresa = empresa ?? undefined;
     sessao.documentos = classificarSentido(documentos, empresa?.cnpj);
+    // O vínculo com a análise salva é de quem chamou: o lote novo ainda não tem.
+    sessao.analiseId = undefined;
+    sessao.analiseOrigem = undefined;
+    sessao.loteId = `lote-${++this.contadorLotes}`;
 
     // O histórico guarda só a importação vigente, para o painel e a lista de
     // importações contarem a mesma história.
@@ -141,6 +146,25 @@ export class SessionService {
   }
 
   /**
+   * Liga o lote vigente da sessão à análise salva que o guarda, só se o
+   * lote ainda for `loteId`: outro upload ou abertura no meio do caminho
+   * não pode herdar a análise de um lote que já saiu da sessão.
+   * Sem `analiseId`, desfaz o vínculo. Devolve se ligou.
+   */
+  vincularAnalise(
+    sessionId: string,
+    loteId: string | undefined,
+    analiseId: string | undefined,
+    origem: 'upload' | 'aberta' = 'upload'
+  ): boolean {
+    const sessao = this.sessions.get(sessionId);
+    if (!sessao || !loteId || sessao.loteId !== loteId) return false;
+    sessao.analiseId = analiseId;
+    sessao.analiseOrigem = analiseId ? origem : undefined;
+    return true;
+  }
+
+  /**
    * Limpa os dados da sessão (novo upload, recomeça)
    */
   async limparSessao(sessionId: string): Promise<UserSession> {
@@ -152,6 +176,9 @@ export class SessionService {
 
     sessao.documentos = [];
     sessao.empresa = undefined;
+    sessao.analiseId = undefined;
+    sessao.analiseOrigem = undefined;
+    sessao.loteId = undefined;
     sessao.dashboard = null;
     sessao.importacoes = [];
     sessao.ultimaAtualizacao = new Date().toISOString();

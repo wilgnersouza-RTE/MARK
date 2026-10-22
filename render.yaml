@@ -61,6 +61,15 @@ services:
       - key: UPSTASH_REDIS_REST_TOKEN
         sync: false
 
+      # PREENCHA no painel do Render, com os dados do projeto Supabase
+      # (região São Paulo). Guardam as análises salvas e os ZIPs. A chave é a
+      # service_role e fica só aqui no backend. Sem elas, as análises ficam em
+      # memória e somem a cada deploy ou hibernação.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+
       - key: MAX_UPLOAD_SIZE
         value: 52428800
 

@@ -53,6 +53,15 @@ export const config = {
     allowedMimes: ['application/xml', 'application/zip'],
   },
   
+  /**
+   * Supabase, onde ficam as análises salvas e os ZIPs (só o backend usa).
+   * Sem URL e chave, as análises ficam em memória e somem ao reiniciar.
+   */
+  supabase: {
+    url: process.env.SUPABASE_URL || '',
+    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+  },
+
   // Auth0 (opcional)
   auth0: {
     domain: process.env.AUTH0_DOMAIN,

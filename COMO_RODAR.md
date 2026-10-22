@@ -112,6 +112,61 @@ destinatária ou tomadora), saída (a empresa é emitente) ou sem vínculo. Quan
 a empresa não é clara, a resposta traz `precisaEscolherEmpresa` e os
 `candidatosEmpresa`.
 
+### Análises salvas
+| Método | Rota                                   | Descrição                                   |
+| ------ | -------------------------------------- | ------------------------------------------- |
+| GET    | `/api/v1/analises?empresa=<cnpj>&offset=0&limite=100` | Análises, mais recentes primeiro, em páginas de até 100 (`empresa=sem-empresa` traz as sem empresa) |
+| GET    | `/api/v1/analises/empresas`            | Empresas com análise salva                  |
+| GET    | `/api/v1/analises/uso`                 | Espaço ocupado e limites do plano gratuito  |
+| POST   | `/api/v1/analises/:id/abrir`           | Carrega a análise na sessão (resposta igual à do upload) |
+| POST   | `/api/v1/analises/:id/reprocessar`     | Gera a versão seguinte do ZIP guardado, com regras e tabela atuais; não abre a versão nova |
+
+Códigos de resposta das rotas de análises:
+
+- 400: `empresa` que não é CNPJ de 14 dígitos (com ou sem pontuação) nem
+  `sem-empresa`; `offset` ou `limite` inválidos; no reprocessamento, ZIP
+  guardado ausente, ilegível ou sem nenhuma nota.
+- 404: análise inexistente (ou ainda incompleta) em `/abrir` e `/reprocessar`.
+- 503: o armazenamento falhou. A mensagem diz a causa: projeto pausado ou
+  fora do ar, espaço gratuito esgotado ou chave recusada.
+
+A listagem traz `paginacao: { offset, limite, temMais }`; a tela tem o botão
+"Carregar mais".
+
+Todo upload é salvo como análise: competência é o mês (AAAA-MM) com mais notas
+pelo dia de emissão do XML, e reimportar a mesma empresa e competência cria a
+versão seguinte, sem apagar as anteriores. A resposta do upload e da troca de
+empresa traz `analise` (id, competência, versão) e `analiseSalva`; se o
+armazenamento falhar, `analiseSalva` vem `false` com `avisoAnalise` (com a
+causa) e o lote segue só na sessão. Sem a Supabase configurada, `analiseSalva`
+vem `true` com o aviso de que a análise está só em memória. Nenhuma rota
+exclui análise nem ZIP.
+
+Trocar a empresa de um lote importado nesta sessão atualiza a própria análise.
+Trocar a empresa de uma análise aberta da lista não a reescreve: grava uma
+versão nova, com o mesmo ZIP, e o painel passa a apontar para ela.
+
+#### Liberando espaço no plano gratuito
+
+O plano gratuito da Supabase tem 1 GB para os ZIPs e 500 MB de banco; a área
+"Análises salvas" mostra o uso. Como não existe rota de exclusão, liberar
+espaço é um procedimento manual, feito por quem administra o projeto:
+
+1. Exporte antes o que vai sair: no Storage, baixe os ZIPs do bucket `lotes`;
+   no SQL Editor, rode um `select` das análises escolhidas e guarde o
+   resultado.
+2. Escolha as análises, de preferência versões antigas já substituídas
+   (`select id, empresa_cnpj, competencia, versao, zip_path from analises
+   order by criado_em`).
+3. No SQL Editor, apague primeiro as notas e depois a análise:
+   `delete from analise_notas where analise_id = '<id>';` e
+   `delete from analises where id = '<id>';`.
+4. No Storage, apague o arquivo de `zip_path` no bucket `lotes`.
+5. Linhas com `completa = false` são gravações interrompidas: não aparecem na
+   tela e podem sair pelo mesmo caminho.
+
+A exclusão é irreversível; confira os ids duas vezes antes de rodar.
+
 ### Dashboard
 | Método | Rota                               | Descrição                    |
 | ------ | ---------------------------------- | ---------------------------- |
@@ -203,8 +258,13 @@ processados normalmente.
 
 As sessões vivem na memória do processo. Reiniciar o backend apaga os
 documentos importados. O token continua válido e a sessão é recriada vazia no
-próximo upload — é comportamento esperado, não erro. Para persistir, veja o
-`DEVELOPMENT.md`.
+próximo upload — é comportamento esperado, não erro.
+
+As **análises salvas** sobrevivem ao reinício quando `SUPABASE_URL` e
+`SUPABASE_SERVICE_ROLE_KEY` estão no `backend/.env` (veja o passo 1b do
+`DEPLOY.md` para criar o projeto e rodar `backend/supabase/schema.sql` uma
+vez). Sem elas, ficam em memória como as sessões. Depois de reiniciar, abra a
+análise em "Análises salvas" em vez de reimportar o ZIP.
 
 ---
 
