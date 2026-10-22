@@ -525,22 +525,43 @@ describe('ArmazenamentoAnalisesSupabase', () => {
     expect(chamadas.map(c => `${c.init.method} ${c.url}`)).toEqual([
       `PATCH ${URL_PROJETO}/rest/v1/analises?id=eq.${analise.id}`,
       `POST ${URL_PROJETO}/rest/v1/analise_notas?on_conflict=analise_id,ordem`,
+      `DELETE ${URL_PROJETO}/rest/v1/analise_notas?analise_id=eq.${analise.id}&ordem=gte.1`,
       `PATCH ${URL_PROJETO}/rest/v1/analises?id=eq.${analise.id}`,
       `POST ${URL_PROJETO}/storage/v1/object/move`,
       `PATCH ${URL_PROJETO}/rest/v1/analises?id=eq.${analise.id}`,
     ]);
     expect(JSON.parse(chamadas[0].init.body)).toEqual({ completa: false });
     expect(chamadas[1].init.headers.Prefer).toContain('resolution=merge-duplicates');
-    expect(JSON.parse(chamadas[2].init.body)).toEqual(
+    expect(JSON.parse(chamadas[3].init.body)).toEqual(
       expect.objectContaining({ empresa_cnpj: OUTRA, empresa_nome: 'OUTRA', versao: 2, completa: true })
     );
-    expect(JSON.parse(chamadas[3].init.body)).toEqual({
+    expect(JSON.parse(chamadas[4].init.body)).toEqual({
       bucketId: 'lotes',
       sourceKey: analise.zipPath,
       destinationKey: novoCaminho,
     });
-    expect(JSON.parse(chamadas[4].init.body)).toEqual({ zip_path: novoCaminho });
+    expect(JSON.parse(chamadas[5].init.body)).toEqual({ zip_path: novoCaminho });
     expect(salva.zipPath).toBe(novoCaminho);
+  });
+
+  it('atualizarEmpresa com menos notas apaga as linhas que sobram e grava total_notas', async () => {
+    responder(padrao);
+    const loja = new ArmazenamentoAnalisesSupabase(URL_PROJETO, 'k');
+
+    await loja.atualizarEmpresa(
+      analise.id,
+      { empresaCnpj: EMPRESA, empresaNome: 'EMPRESA', competencia: '2026-03', versao: 1, resumo: {}, zipPath: analise.zipPath },
+      [nota('2026-03-01'), nota('2026-03-02')]
+    );
+
+    const apagar = chamadas.find(c => c.init.method === 'DELETE');
+    expect(apagar?.url).toBe(`${URL_PROJETO}/rest/v1/analise_notas?analise_id=eq.${analise.id}&ordem=gte.2`);
+    const ultimoPatch = chamadas.filter(c => c.init.method === 'PATCH').pop();
+    expect(JSON.parse(ultimoPatch!.init.body)).toEqual(expect.objectContaining({ total_notas: 2, completa: true }));
+    // O DELETE vem depois do upsert e antes de a análise voltar a aparecer.
+    const ordem = chamadas.map(c => c.init.method);
+    expect(ordem.indexOf('DELETE')).toBeGreaterThan(ordem.indexOf('POST'));
+    expect(ordem.lastIndexOf('PATCH')).toBeGreaterThan(ordem.indexOf('DELETE'));
   });
 
   it('(d) se mover o ZIP falhar, a análise continua apontando para o caminho antigo', async () => {

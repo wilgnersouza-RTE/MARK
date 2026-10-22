@@ -4,6 +4,7 @@ import { FiltrosAnalise, filtrarDocumentos } from '../utils/filtros';
 import { armazenamentoAnalises, causaDaFalha, geracaoAnalises, resumoPublico, AnalisePublica } from './analises';
 import { AnaliseSalva, SEM_COMPETENCIA } from './armazenamentoAnalises';
 import { sessionService } from './session';
+import { identidadesNota } from '../utils/identidadeNota';
 
 /**
  * Conjunto da empresa: todas as importações salvas de um cliente, para o
@@ -15,7 +16,7 @@ import { sessionService } from './session';
  *     nota com data) entram todas, porque não são versões umas das outras.
  *   - Se a versão mais recente sumiu ou mudou de empresa/competência entre a
  *     listagem e a leitura, vale a próxima versão listada da competência.
- *   - A mesma nota (modelo + CNPJ do emitente + chave) em duas importações
+ *   - A mesma nota (identidade de utils/identidadeNota.ts) em duas importações
  *     conta uma vez, na importação mais recente (por data de gravação).
  *
  * Tudo aqui é leitura: escolher a empresa não mexe no lote da sessão nem nas
@@ -101,6 +102,8 @@ export interface ImportacaoDoConjunto {
   analise: AnalisePublica;
   /** Notas que ficaram nesta importação depois de tirar as repetidas */
   documentos: NFeDocument[];
+  /** Todas as notas gravadas nesta importação, com as repetidas (bloqueio de duplicados) */
+  todas: NFeDocument[];
 }
 
 export interface ConjuntoEmpresa {
@@ -116,7 +119,7 @@ export interface ConjuntoEmpresa {
 // ==================== Listagem ====================
 
 /** Todas as análises completas da empresa, sem repetir id entre páginas. */
-async function todasAsAnalises(cnpj: string): Promise<AnaliseSalva[]> {
+export async function todasAsAnalises(cnpj: string): Promise<AnaliseSalva[]> {
   const loja = armazenamentoAnalises();
   const porId = new Map<string, AnaliseSalva>();
   for (let offset = 0; ; ) {
@@ -209,14 +212,20 @@ async function emParalelo<T, R>(itens: T[], limite: number, tarefa: (item: T) =>
   return resultados;
 }
 
-/** Chave da nota para tirar repetidas; null quando não há chave confiável. */
-function chaveDaNota(doc: NFeDocument): string | null {
-  const chave = (doc.chaveNFe ?? '').trim();
-  if (!chave || chave.toUpperCase() === 'N/A') return null;
-  return `${doc.modelo}|${doc.cnpjEmitente ?? ''}|${chave}`;
-}
-
 const ordemDaCompetencia = (c: string) => (c === SEM_COMPETENCIA ? '' : c);
+
+/**
+ * Chaves para tirar repetidas do conjunto: as identidades da nota e, sem
+ * identidade, a chave de antes (modelo + emitente + chave, quando houver).
+ * O recurso vale só aqui; o bloqueio da importação nunca o usa.
+ */
+function chavesDoConjunto(doc: NFeDocument): string[] {
+  const identidades = identidadesNota(doc);
+  if (identidades.length > 0) return identidades;
+  const chave = (doc.chaveNFe ?? '').trim();
+  if (!chave || chave.toUpperCase() === 'N/A') return [];
+  return [`${doc.modelo}|${doc.cnpjEmitente ?? ''}|${chave}`];
+}
 
 async function montarConjunto(cnpj: string, analises: AnaliseSalva[]): Promise<ConjuntoEmpresa> {
   const loja = armazenamentoAnalises();
@@ -242,11 +251,12 @@ async function montarConjunto(cnpj: string, analises: AnaliseSalva[]): Promise<C
   );
   const importacoes: ImportacaoDoConjunto[] = porRecencia.map(({ analise, documentos }) => ({
     analise: resumoPublico(analise),
+    todas: documentos,
     documentos: documentos.filter(doc => {
-      const chave = chaveDaNota(doc);
-      if (chave === null) return true;
-      if (vistas.has(chave)) return false;
-      vistas.add(chave);
+      const chaves = chavesDoConjunto(doc);
+      if (chaves.length === 0) return true;
+      if (chaves.some(c => vistas.has(c))) return false;
+      for (const c of chaves) vistas.add(c);
       return true;
     }),
   }));
