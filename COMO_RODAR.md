@@ -89,6 +89,42 @@ da análise na query string: `?sentido=entrada|saida|indefinido&cfop=5102&ncm=84
 Valor ausente ou inválido vale como "todos". O CFOP é o do emitente, como
 consta no XML.
 
+Todas as rotas de dashboard (inclusive `/filtros`) e o `/export/excel`
+aceitam também `?empresa=<cnpj>` (14 dígitos, com ou sem pontuação). Sem ele,
+as notas são as do lote da sessão ("Lote atual"). Com ele, são as das análises
+salvas da empresa: só a versão mais recente de cada competência, somadas; as
+versões antigas continuam salvas e ficam fora. As análises "sem competência"
+(nenhuma nota com data) entram todas. Se a versão mais recente for excluída ou
+mudar de empresa no meio da carga, vale a versão anterior da competência.
+A mesma nota (modelo + CNPJ do emitente + chave) em duas importações conta uma
+vez só, na importação gravada por último; notas sem chave (vazia ou "N/A") não
+são comparadas. As linhas de "Importações do cliente" contam só as notas que
+ficaram. Escolher a empresa só lê: não troca o lote da sessão nem altera
+análises. Análises sem empresa definida não aparecem na lista Empresa.
+
+Cache do conjunto: a carga das notas fica guardada por sessão e é
+reaproveitada enquanto a lista de análises da empresa não mudar (análise nova,
+excluída, reprocessada ou com empresa trocada faz recarregar), por até 10
+minutos. Cabem até 200 mil notas no total; acima disso sai a sessão usada há
+mais tempo. Sessão limpa, excluída ou expirada perde o que tinha guardado. A
+listagem que decide se mudou algo é feita uma vez para as chamadas simultâneas
+do painel e reaproveitada por 5 segundos, ou até este servidor gravar,
+alterar ou excluir uma análise.
+
+`empresa` inválida responde 400; falha da Supabase responde 503 com a causa.
+Com `empresa`, o `/export/excel` traz a linha "Origem: Conjunto da empresa
+<nome> (<CNPJ>)" no cabeçalho das abas da reforma, a aba "Importações"
+(competência, versão, data e notas de cada importação incluída) e o nome
+`analise-<cnpj>-conjunto-<AAAA-MM-DD>.xlsx`; o `/export/json` traz `origem`,
+`importacoes`, documentos e dashboard do conjunto, em
+`analise-<cnpj>-conjunto-<AAAA-MM-DD>.json`. Sem análise da empresa, os dois
+respondem 400 com "Nenhuma análise salva desta empresa". Sem nome em nenhuma
+análise, a empresa aparece pelo CNPJ formatado.
+Empresa sem análise devolve o conjunto vazio com o aviso "Nenhuma análise
+salva desta empresa". `/filtros` devolve ainda `empresas` (as empresas com
+análise salva; vazia com `avisoEmpresas` se a Supabase falhar, sem derrubar o
+lote atual), `empresa` e, quando houver, `aviso`.
+
 ### Autenticação
 | Método | Rota                        | Descrição                          |
 | ------ | --------------------------- | ---------------------------------- |
@@ -211,7 +247,8 @@ Para quem administra o projeto Supabase:
 | GET    | `/api/v1/dashboard/fornecedores`   | Top fornecedores             |
 | GET    | `/api/v1/dashboard/documentos`     | Documentos (com paginação)   |
 | GET    | `/api/v1/dashboard/campos`         | Conferência de tributos por nota |
-| GET    | `/api/v1/dashboard/filtros`        | CFOPs e NCMs do lote, com quantidade |
+| GET    | `/api/v1/dashboard/filtros`        | CFOPs e NCMs do lote, com quantidade, e empresas com análise salva |
+| GET    | `/api/v1/dashboard/importacoes?empresa=<cnpj>` | Importações incluídas no conjunto da empresa (competência, versão, data, notas, valor total, tributos) e total geral, dentro dos filtros; sem `empresa`, 400 |
 
 ### Export
 | Método | Rota                                | Descrição              |
@@ -462,7 +499,12 @@ Enquanto os arquivos não existirem, gradientes equivalentes aparecem no lugar
 ## Painel executivo
 
 A tela tem duas abas, **Painel** e **Regimes**, abaixo do cartão **Filtros da
-análise** (Entrada/Saída, CFOP do emitente e NCM). A seleção vale para os
+análise** (Empresa, Entrada/Saída, CFOP do emitente e NCM). A lista Empresa
+abre em "Lote atual" (o lote da sessão) e traz as empresas com análise salva;
+escolhida uma, tudo passa a valer para o conjunto dela (versão mais recente de
+cada competência), e o Painel ganha no topo o bloco **Importações do cliente**,
+com uma linha por importação incluída e o total geral. Importar ou abrir um
+lote volta a lista para "Lote atual". A seleção vale para os
 indicadores do topo, as duas abas, a conferência da reforma e o botão
 Exportar, e continua a mesma ao trocar de aba. Sem empresa analisada, o filtro
 abre em "Todas"; com empresa e alguma entrada, em "Entradas/Compras".

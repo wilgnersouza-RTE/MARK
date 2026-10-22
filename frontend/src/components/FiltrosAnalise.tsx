@@ -1,5 +1,6 @@
 import React from 'react';
 import { SlidersHorizontal, ChevronUp, ChevronDown, Download, Loader2, X } from 'lucide-react';
+import { formatarCNPJ } from '../utils/format';
 
 /**
  * Filtros da análise: Entrada/Saída, CFOP e NCM.
@@ -12,6 +13,8 @@ import { SlidersHorizontal, ChevronUp, ChevronDown, Download, Loader2, X } from 
 export type SentidoFiltro = 'entrada' | 'saida' | 'indefinido' | 'todas';
 
 export interface EstadoFiltros {
+  /** CNPJ da empresa cujas análises salvas formam o conjunto; '' = lote atual */
+  empresa: string;
   sentido: SentidoFiltro;
   /** '' = todos os CFOPs */
   cfop: string;
@@ -30,13 +33,28 @@ export interface OpcoesFiltros {
   temEmpresa: boolean;
   sentidoPadrao: SentidoFiltro;
   totalDocumentos: number;
+  /** Empresas com análise salva, para a lista EMPRESA */
+  empresas?: EmpresaDoFiltro[];
+  /** Empresa da resposta (null = lote atual) */
+  empresa?: string | null;
+  /** Ex.: "Nenhuma análise salva desta empresa" */
+  aviso?: string;
+  /** Por que a lista de empresas veio vazia (armazenamento fora) */
+  avisoEmpresas?: string;
+}
+
+export interface EmpresaDoFiltro {
+  cnpj: string;
+  nome: string | null;
+  quantidade: number;
 }
 
 /** Query string enviada às rotas: só os filtros ativos. */
-export type ParametrosFiltro = Partial<Record<'sentido' | 'cfop' | 'ncm', string>>;
+export type ParametrosFiltro = Partial<Record<'empresa' | 'sentido' | 'cfop' | 'ncm', string>>;
 
 export function paraParametros(filtros: EstadoFiltros): ParametrosFiltro {
   const params: ParametrosFiltro = {};
+  if (filtros.empresa) params.empresa = filtros.empresa;
   if (filtros.sentido !== 'todas') params.sentido = filtros.sentido;
   if (filtros.cfop) params.cfop = filtros.cfop;
   if (filtros.ncm) params.ncm = filtros.ncm;
@@ -53,10 +71,17 @@ const SENTIDOS: Array<{ valor: SentidoFiltro; rotulo: string; exigeEmpresa?: boo
 
 const plural = (n: number) => `${n} nota${n === 1 ? '' : 's'}`;
 
+function rotuloEmpresa(cnpj: string, empresas: EmpresaDoFiltro[]): string {
+  if (!cnpj) return 'Lote atual';
+  const empresa = empresas.find(e => e.cnpj === cnpj);
+  return empresa?.nome ? `${empresa.nome} (${formatarCNPJ(cnpj)})` : formatarCNPJ(cnpj);
+}
+
 /** Uma linha com a seleção atual, para o cartão retraído. */
-function resumoDaSelecao(filtros: EstadoFiltros): string {
+function resumoDaSelecao(filtros: EstadoFiltros, empresas: EmpresaDoFiltro[]): string {
   const sentido = SENTIDOS.find(s => s.valor === filtros.sentido)?.rotulo ?? 'Todas';
   return [
+    rotuloEmpresa(filtros.empresa, empresas),
     sentido,
     filtros.cfop ? `CFOP ${filtros.cfop}` : 'Todos os CFOPs',
     filtros.ncm ? `NCM ${filtros.ncm}` : 'Todos os NCMs',
@@ -106,9 +131,17 @@ export const FiltrosAnalise: React.FC<{
   retraido: boolean;
   onAlternarRetraido: () => void;
 }> = ({ filtros, opcoes, onChange, onExportar, exportando, retraido, onAlternarRetraido }) => {
-  const padrao: EstadoFiltros = { sentido: opcoes.sentidoPadrao, cfop: '', ncm: '' };
+  // Limpar filtros mantém a empresa: ela é a origem das notas, não um recorte.
+  const padrao: EstadoFiltros = { empresa: filtros.empresa, sentido: opcoes.sentidoPadrao, cfop: '', ncm: '' };
   const foraDoPadrao =
     filtros.sentido !== padrao.sentido || filtros.cfop !== padrao.cfop || filtros.ncm !== padrao.ncm;
+  const empresas = opcoes.empresas ?? [];
+  // A empresa escolhida continua na lista mesmo se ela vier vazia (armazenamento fora).
+  const listaEmpresas =
+    filtros.empresa && !empresas.some(e => e.cnpj === filtros.empresa)
+      ? [{ cnpj: filtros.empresa, nome: null, quantidade: 0 }, ...empresas]
+      : empresas;
+  const origem = filtros.empresa ? 'das análises salvas da empresa' : 'do lote';
 
   return (
   <div className="rounded-xl border border-fundo-borda bg-fundo-card p-5 shadow-lg shadow-black/5">
@@ -119,9 +152,9 @@ export const FiltrosAnalise: React.FC<{
         </span>
         <div>
           <p className="font-semibold text-tinta-forte">Filtros da análise</p>
-          <p className="text-xs text-tinta-suave">Entrada/Saída, CFOP e NCM do lote</p>
+          <p className="text-xs text-tinta-suave">Empresa, Entrada/Saída, CFOP e NCM {origem}</p>
           {retraido && (
-            <p className="mt-0.5 text-xs font-medium text-tinta-media">{resumoDaSelecao(filtros)}</p>
+            <p className="mt-0.5 text-xs font-medium text-tinta-media">{resumoDaSelecao(filtros, listaEmpresas)}</p>
           )}
         </div>
       </div>
@@ -159,7 +192,29 @@ export const FiltrosAnalise: React.FC<{
     </div>
 
     {!retraido && (
-      <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <ListaSuspensa
+          id="filtro-empresa"
+          rotulo="Empresa"
+          valor={filtros.empresa}
+          // Trocar a origem zera CFOP e NCM: os códigos são de outro conjunto.
+          onChange={v => onChange({ empresa: v, sentido: 'todas', cfop: '', ncm: '' })}
+          ajuda={
+            opcoes.avisoEmpresas
+              ? 'Empresas indisponíveis no momento'
+              : filtros.empresa
+                ? 'Versão mais recente de cada competência'
+                : 'Lote aberto nesta sessão'
+          }
+        >
+          <option value="">Lote atual</option>
+          {listaEmpresas.map(e => (
+            <option key={e.cnpj} value={e.cnpj}>
+              {rotuloEmpresa(e.cnpj, listaEmpresas)}
+            </option>
+          ))}
+        </ListaSuspensa>
+
         <ListaSuspensa
           id="filtro-sentido"
           rotulo="Entrada/Saída"
@@ -178,7 +233,7 @@ export const FiltrosAnalise: React.FC<{
           rotulo="CFOP do emitente"
           valor={filtros.cfop}
           onChange={v => onChange({ ...filtros, cfop: v })}
-          ajuda="Código como está no XML · quantidade no lote"
+          ajuda={`Código como está no XML · quantidade ${filtros.empresa ? "no conjunto" : "no lote"}`}
         >
           <option value="">Todos os CFOPs</option>
           {opcoes.cfops.map(o => (
@@ -193,7 +248,7 @@ export const FiltrosAnalise: React.FC<{
           rotulo="NCM"
           valor={filtros.ncm}
           onChange={v => onChange({ ...filtros, ncm: v })}
-          ajuda="Quantidade no lote"
+          ajuda={filtros.empresa ? "Quantidade no conjunto" : "Quantidade no lote"}
         >
           <option value="">Todos os NCMs</option>
           {opcoes.ncms.map(o => (

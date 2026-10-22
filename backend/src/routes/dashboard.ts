@@ -7,13 +7,18 @@
  * GET /api/v1/dashboard/documentos   - Documentos da sessão
  * GET /api/v1/dashboard/campos       - Conferência dos campos tributários
  * GET /api/v1/dashboard/filtros      - Opções de Entrada/Saída, CFOP e NCM do lote
+ * GET /api/v1/dashboard/importacoes  - Importações incluídas no conjunto da empresa
  *
  * Todas, menos /filtros, aceitam ?sentido=&cfop=&ncm= e respondem só pelas
  * notas do recorte (ver utils/filtros.ts).
+ *
+ * Todas aceitam ?empresa=<cnpj>: em vez do lote da sessão, as notas vêm do
+ * conjunto da empresa, a versão mais recente de cada competência salva
+ * (ver services/conjuntoEmpresa.ts). Sem o parâmetro, vale o lote atual.
+ * Empresa inválida responde 400; falha do armazenamento, 503 com a causa.
  */
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../middleware/auth';
-import { sessionService } from '../services/session';
 import {
   DATA_DE_CORTE,
   conferirReforma,
@@ -24,24 +29,33 @@ import {
 import { dashboardService } from '../services/dashboard';
 import { DashboardData, NFeDocument } from '../types';
 import { filtrarDocumentos, lerFiltros, opcoesDoLote } from '../utils/filtros';
+import {
+  lerEmpresa,
+  origemDosDocumentos,
+  responderFalhaDoConjunto,
+  tabelaDeImportacoes,
+} from '../services/conjuntoEmpresa';
+import { armazenamentoAnalises, causaDaFalha } from '../services/analises';
 
 const router = Router();
 
 /**
- * Resolve a sessão, aplica os filtros da query e devolve o dashboard
- * calculado só sobre as notas do recorte.
- * Centraliza o que antes estava duplicado em cada rota.
+ * Resolve a origem (lote da sessão ou conjunto da empresa), aplica os
+ * filtros da query e devolve o dashboard calculado só sobre as notas do
+ * recorte. Centraliza o que antes estava duplicado em cada rota.
  */
 async function carregarDashboard(
   req: Request
 ): Promise<{ documentos: NFeDocument[]; dashboard: DashboardData | null; sessionId: string | null }> {
+  // Empresa inválida é 400 mesmo sem sessão.
+  lerEmpresa(req.query);
   const sessionId = req.sessionId || (req.headers['x-session-id'] as string | undefined) || null;
 
   if (!sessionId) {
     return { documentos: [], dashboard: null, sessionId: null };
   }
 
-  const doLote = sessionService.obterDocumentos(sessionId);
+  const { documentos: doLote } = await origemDosDocumentos(sessionId, req.query);
 
   if (!doLote || doLote.length === 0) {
     return { documentos: [], dashboard: null, sessionId };
@@ -70,6 +84,12 @@ function erro(res: Response, status: number, mensagem: string) {
   });
 }
 
+/** Empresa inválida: 400; falha ao carregar o conjunto: 503 com a causa; o resto, 500. */
+function falha(res: Response, e: any, mensagemPadrao?: string) {
+  if (responderFalhaDoConjunto(res, e)) return;
+  return erro(res, 500, e?.message || mensagemPadrao || 'Erro interno');
+}
+
 /**
  * GET /api/v1/dashboard
  * Dashboard completo da sessão
@@ -88,7 +108,7 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('Erro ao gerar dashboard:', error);
-    erro(res, 500, error.message || 'Erro ao gerar dashboard');
+    falha(res, error, 'Erro ao gerar dashboard');
   }
 });
 
@@ -106,7 +126,7 @@ router.get('/resumo', authenticate, async (req: Request, res: Response) => {
 
     responder(res, dashboard ? dashboard.resumoGeral : null);
   } catch (error: any) {
-    erro(res, 500, error.message);
+    falha(res, error);
   }
 });
 
@@ -124,7 +144,7 @@ router.get('/regimes', authenticate, async (req: Request, res: Response) => {
 
     responder(res, dashboard ? dashboard.porRegime : []);
   } catch (error: any) {
-    erro(res, 500, error.message);
+    falha(res, error);
   }
 });
 
@@ -142,7 +162,7 @@ router.get('/fornecedores', authenticate, async (req: Request, res: Response) =>
 
     responder(res, dashboard ? dashboard.porFornecedor : []);
   } catch (error: any) {
-    erro(res, 500, error.message);
+    falha(res, error);
   }
 });
 
@@ -152,13 +172,15 @@ router.get('/fornecedores', authenticate, async (req: Request, res: Response) =>
  */
 router.get('/documentos', authenticate, async (req: Request, res: Response) => {
   try {
+    lerEmpresa(req.query);
     const sessionId = req.sessionId || (req.headers['x-session-id'] as string | undefined);
 
     if (!sessionId) {
       return erro(res, 400, 'Session ID não encontrado');
     }
 
-    const documentos = filtrarDocumentos(sessionService.obterDocumentos(sessionId), lerFiltros(req.query));
+    const origem = await origemDosDocumentos(sessionId, req.query);
+    const documentos = filtrarDocumentos(origem.documentos, lerFiltros(req.query));
 
     const pagina = Math.max(1, parseInt(String(req.query.pagina || '1'), 10) || 1);
     const porPagina = Math.min(500, Math.max(1, parseInt(String(req.query.porPagina || '50'), 10) || 50));
@@ -171,7 +193,7 @@ router.get('/documentos', authenticate, async (req: Request, res: Response) => {
       porPagina,
     });
   } catch (error: any) {
-    erro(res, 500, error.message);
+    falha(res, error);
   }
 });
 
@@ -189,10 +211,10 @@ router.get('/documentos', authenticate, async (req: Request, res: Response) => {
 router.get('/campos', authenticate, async (req: Request, res: Response) => {
   try {
     const sessionId = req.sessionId!;
-    const sessao = sessionService.obterSessao(sessionId);
+    const origem = await origemDosDocumentos(sessionId, req.query);
     const tabela = tabelaCarregada();
     const filtros = lerFiltros(req.query);
-    const documentos = sessao?.documentos ?? [];
+    const documentos = origem.documentos;
 
     // Os cartões Entradas e Saídas são a própria divisão por sentido: ignoram
     // esse filtro e respeitam CFOP e NCM. Confere-se uma vez o recorte sem
@@ -243,12 +265,12 @@ router.get('/campos', authenticate, async (req: Request, res: Response) => {
         semData: contar('sem data'),
       },
       porSentido,
-      temEmpresa: !!sessao?.empresa,
+      temEmpresa: !!origem.empresa,
       versaoTabela: tabela.versao,
       dataDeCorte: DATA_DE_CORTE,
     });
   } catch (e: any) {
-    erro(res, 500, e.message);
+    falha(res, e);
   }
 });
 
@@ -260,18 +282,34 @@ router.get('/campos', authenticate, async (req: Request, res: Response) => {
  * filtros. `sentidoPadrao` diz onde o filtro Entrada/Saída abre: em
  * entradas quando há empresa analisada e ao menos uma nota de entrada; em
  * todas nos demais casos, para o painel não abrir vazio.
+ *
+ * Com ?empresa=, opções e sentido padrão saem do conjunto da empresa.
+ * `empresas` lista as empresas com análise salva, para a lista EMPRESA; se
+ * o armazenamento falhar, vem vazia com `avisoEmpresas`, e o lote atual
+ * continua respondendo.
  */
 router.get('/filtros', authenticate, async (req: Request, res: Response) => {
   try {
+    // Valida antes de qualquer leitura: empresa inválida não lista nada.
+    const cnpj = lerEmpresa(req.query);
     const sessionId = req.sessionId || (req.headers['x-session-id'] as string | undefined);
 
     if (!sessionId) {
       return erro(res, 400, 'Session ID não encontrado');
     }
 
-    const sessao = sessionService.obterSessao(sessionId);
-    const documentos = sessao?.documentos ?? [];
-    const temEmpresa = !!sessao?.empresa;
+    let empresas: Array<{ cnpj: string; nome: string | null; quantidade: number }> = [];
+    let avisoEmpresas: string | undefined;
+    try {
+      // Só empresas de fato: análises sem empresa não formam conjunto.
+      empresas = (await armazenamentoAnalises().listarEmpresas()).filter(e => e.cnpj);
+    } catch (e) {
+      avisoEmpresas = `Não foi possível listar as empresas com análise salva: ${causaDaFalha(e)}`;
+    }
+
+    const origem = await origemDosDocumentos(sessionId, req.query);
+    const documentos = origem.documentos;
+    const temEmpresa = !!origem.empresa;
 
     responder(res, {
       cfops: opcoesDoLote(documentos, 'cfops'),
@@ -279,9 +317,32 @@ router.get('/filtros', authenticate, async (req: Request, res: Response) => {
       temEmpresa,
       sentidoPadrao: temEmpresa && documentos.some(d => d.tipo === 'entrada') ? 'entrada' : 'todas',
       totalDocumentos: documentos.length,
+      empresa: cnpj,
+      empresas,
+      ...(avisoEmpresas ? { avisoEmpresas } : {}),
+      ...(origem.aviso ? { aviso: origem.aviso } : {}),
     });
   } catch (e: any) {
-    erro(res, 500, e.message);
+    falha(res, e);
+  }
+});
+
+/**
+ * GET /api/v1/dashboard/importacoes?empresa=<cnpj>
+ *
+ * Importações incluídas no conjunto da empresa (a versão mais recente de
+ * cada competência), uma linha cada com notas, valor total e tributos do
+ * recorte (?sentido=&cfop=&ncm=), e o total geral. Sem empresa: 400.
+ */
+router.get('/importacoes', authenticate, async (req: Request, res: Response) => {
+  try {
+    if (!lerEmpresa(req.query)) {
+      return erro(res, 400, 'Informe a empresa (CNPJ com 14 dígitos) em ?empresa=.');
+    }
+    const origem = await origemDosDocumentos(req.sessionId!, req.query);
+    responder(res, tabelaDeImportacoes(origem.conjunto!, lerFiltros(req.query)));
+  } catch (e: any) {
+    falha(res, e);
   }
 });
 

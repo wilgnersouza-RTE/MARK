@@ -8,6 +8,9 @@ import { sessionService } from '../services/session';
 import { NFeDocument } from '../types';
 import exportRoutes from './export';
 import { conferirCamposNFe, parDoItem } from '../services/camposTributarios';
+import { definirArmazenamentoAnalises } from '../services/analises';
+import { AnaliseSalva, ArmazenamentoAnalisesMemoria, ErroSupabase, caminhoDoZip } from '../services/armazenamentoAnalises';
+import { limparCacheConjuntos } from '../services/conjuntoEmpresa';
 
 const USUARIO = 'teste-export';
 const EMPRESA = '11111111000111';
@@ -322,5 +325,93 @@ describe('GET /export/excel: tipo de problema', () => {
     const linha = (r: string) => consolidado.find(l => l[0] === r)?.slice(1, 5);
     expect(linha('CBS: zerado')).toEqual([1, 0, 0, 1]);
     expect(linha('CBS: ausente')).toEqual([0, 0, 0, 0]);
+  });
+});
+
+describe('exportação do conjunto da empresa (?empresa=)', () => {
+  let loja: ArmazenamentoAnalisesMemoria;
+  let idAnalise = 0;
+
+  async function salvar(competencia: string, versao: number, documentos: NFeDocument[]) {
+    idAnalise++;
+    const id = `00000000-0000-4000-a000-${String(idAnalise).padStart(12, '0')}`;
+    const analise: AnaliseSalva = {
+      id,
+      empresaCnpj: EMPRESA,
+      empresaNome: 'SUPERA LTDA',
+      competencia,
+      versao,
+      criadoPor: 'contador@exemplo.com',
+      criadoEm: new Date(Date.UTC(2026, 3, 1, 0, idAnalise)).toISOString(),
+      totalNotas: documentos.length,
+      resumo: {},
+      versaoTabela: null,
+      zipPath: caminhoDoZip(EMPRESA, competencia, id),
+      zipBytes: 3,
+    };
+    await loja.salvar(analise, documentos, Buffer.from('zip'));
+  }
+
+  const notas = (prefixo: string, n: number) =>
+    Array.from({ length: n }, (_, i) => ({ ...nota(`${prefixo}-${i}`, OUTRO, EMPRESA, ['1102']), tipo: 'entrada' as const }));
+
+  beforeEach(() => {
+    loja = new ArmazenamentoAnalisesMemoria();
+    definirArmazenamentoAnalises(loja);
+    limparCacheConjuntos();
+  });
+
+  it('exporta só a versão mais recente de cada competência, não o lote da sessão', async () => {
+    await salvar('2026-03', 1, notas('v1', 5));
+    await salvar('2026-03', 2, notas('v2', 4));
+    await salvar('2026-02', 1, notas('fev', 2));
+
+    const resposta = await fetch(`${base}/excel?empresa=${EMPRESA}`, { headers: cabecalhos });
+    expect(resposta.status).toBe(200);
+    expect(resposta.headers.get('content-disposition')).toMatch(
+      new RegExp(`filename="analise-${EMPRESA}-conjunto-[0-9]{4}-[0-9]{2}-[0-9]{2}[.]xlsx"`)
+    );
+    const livro = XLSX.read(Buffer.from(await resposta.arrayBuffer()), { type: 'buffer' });
+
+    expect(linhas(livro, 'Documentos').slice(1)).toHaveLength(6);
+    const importacoes = linhas(livro, 'Importações');
+    expect(importacoes[0]).toEqual(['Origem', 'Conjunto da empresa SUPERA LTDA (11.111.111/0001-11)']);
+    const inicio = importacoes.findIndex(l => l[0] === 'Competência');
+    expect(importacoes.slice(inicio + 1).map(l => [l[0], l[1], l[3]])).toEqual([
+      ['03/2026', 'v2', 4],
+      ['02/2026', 'v1', 2],
+    ]);
+    expect(linhas(livro, 'Pendências de tributos')).toContainEqual([
+      'Origem',
+      'Conjunto da empresa SUPERA LTDA (11.111.111/0001-11)',
+    ]);
+  });
+
+  it('o JSON também respeita a empresa', async () => {
+    await salvar('2026-03', 1, notas('j1', 3));
+    const resposta = await fetch(`${base}/json?empresa=${EMPRESA}`, { headers: cabecalhos });
+    expect(resposta.status).toBe(200);
+    const corpo = (await resposta.json()) as any;
+    expect(corpo.documentos).toHaveLength(3);
+    expect(corpo.origem).toBe('Conjunto da empresa SUPERA LTDA (11.111.111/0001-11)');
+  });
+
+  it('empresa sem análises responde com o aviso', async () => {
+    const resposta = await fetch(`${base}/excel?empresa=${OUTRO}`, { headers: cabecalhos });
+    expect(resposta.status).toBe(400);
+    expect(((await resposta.json()) as any).error).toBe('Nenhuma análise salva desta empresa');
+  });
+
+  it('empresa=abc: 400', async () => {
+    for (const rota of ['excel', 'json']) {
+      expect((await fetch(`${base}/${rota}?empresa=abc`, { headers: cabecalhos })).status).toBe(400);
+    }
+  });
+
+  it('armazenamento fora: 503 com a causa', async () => {
+    jest.spyOn(loja, 'listar').mockRejectedValue(new ErroSupabase('sem rede'));
+    const resposta = await fetch(`${base}/excel?empresa=${EMPRESA}`, { headers: cabecalhos });
+    expect(resposta.status).toBe(503);
+    expect(((await resposta.json()) as any).error).toMatch(/Restore project/);
   });
 });

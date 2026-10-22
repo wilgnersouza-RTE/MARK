@@ -7,6 +7,14 @@ import { sessionService } from '../services/session';
 import { DocumentType, NFeDocument, NFeModel } from '../types';
 import dashboardRoutes from './dashboard';
 import { conferirCamposNFe } from '../services/camposTributarios';
+import { definirArmazenamentoAnalises, excluirAnalises } from '../services/analises';
+import {
+  AnaliseSalva,
+  ArmazenamentoAnalisesMemoria,
+  ErroSupabase,
+  caminhoDoZip,
+} from '../services/armazenamentoAnalises';
+import { limparCacheConjuntos } from '../services/conjuntoEmpresa';
 
 const USUARIO = 'teste-dashboard';
 const EMPRESA = '11111111000111';
@@ -317,6 +325,162 @@ describe('GET /dashboard/campos: conferência da reforma', () => {
     const zero = { total: 0, completas: 0, percentual: 0 };
     expect(corpo.data.porSentido).toEqual({ entrada: zero, saida: zero, semVinculo: zero, total: zero });
     expect(corpo.data.temEmpresa).toBe(false);
+  });
+});
+
+describe('filtro por empresa (?empresa=)', () => {
+  const SUPERA = EMPRESA;
+  let loja: ArmazenamentoAnalisesMemoria;
+  let idAnalise = 0;
+
+  async function salvar(competencia: string, versao: number, documentos: NFeDocument[]) {
+    idAnalise++;
+    const id = `00000000-0000-4000-9000-${String(idAnalise).padStart(12, '0')}`;
+    const analise: AnaliseSalva = {
+      id,
+      empresaCnpj: SUPERA,
+      empresaNome: 'SUPERA LTDA',
+      competencia,
+      versao,
+      criadoPor: 'contador@exemplo.com',
+      criadoEm: new Date(Date.UTC(2026, 3, 1, 0, idAnalise)).toISOString(),
+      totalNotas: documentos.length,
+      resumo: {},
+      versaoTabela: null,
+      zipPath: caminhoDoZip(SUPERA, competencia, id),
+      zipBytes: 3,
+    };
+    await loja.salvar(analise, documentos, Buffer.from('zip'));
+    return analise;
+  }
+
+  /** Notas já classificadas, como ficam gravadas na análise. */
+  const classificadas = (n: number, tipo: DocumentType, total: number) =>
+    Array.from({ length: n }, () => ({ ...nota(tipo, 55, tipo === 'saida' ? ['5102'] : ['1102'], [], total), tipo }));
+
+  beforeEach(() => {
+    loja = new ArmazenamentoAnalisesMemoria();
+    definirArmazenamentoAnalises(loja);
+    limparCacheConjuntos();
+  });
+
+  it('Supera 03/2026 v1, v2 e v3: só a v3 entra, 41 notas, e o totalizador fecha', async () => {
+    await salvar('2026-03', 1, classificadas(41, 'entrada', 10));
+    await salvar('2026-03', 2, classificadas(41, 'entrada', 10));
+    const v3 = await salvar('2026-03', 3, classificadas(41, 'entrada', 10));
+    // A sessão tem outro lote: a empresa não o usa nem o altera.
+    const cabecalhos = await sessaoComLote(lote(), true);
+
+    const resumo = await get(`/resumo?empresa=${SUPERA}`, cabecalhos);
+    expect(resumo.status).toBe(200);
+    expect(resumo.corpo.data.totalDocumentos).toBe(41);
+    expect(resumo.corpo.data.totalValor).toBe(410);
+
+    const importacoes = await get(`/importacoes?empresa=${SUPERA}`, cabecalhos);
+    expect(importacoes.status).toBe(200);
+    expect(importacoes.corpo.data.importacoes).toEqual([
+      expect.objectContaining({ id: v3.id, competencia: '2026-03', versao: 3, notas: 41, valorTotal: 410 }),
+    ]);
+    expect(importacoes.corpo.data.total).toEqual({ notas: 41, valorTotal: 410, tributos: 0 });
+
+    // "Lote atual" de novo: o painel volta ao lote da sessão.
+    const doLote = await get('/resumo', cabecalhos);
+    expect(doLote.corpo.data.totalDocumentos).toBe(4);
+  });
+
+  it('várias competências somadas; filtro de sentido vale para tudo, inclusive o totalizador', async () => {
+    await salvar('2026-01', 1, [...classificadas(2, 'entrada', 100), ...classificadas(1, 'saida', 50)]);
+    await salvar('2026-02', 1, classificadas(9, 'entrada', 1));
+    await salvar('2026-02', 2, classificadas(3, 'entrada', 100));
+    const cabecalhos = await sessaoComLote(lote(), false);
+
+    const todas = await get(`/resumo?empresa=${SUPERA}`, cabecalhos);
+    expect(todas.corpo.data.totalDocumentos).toBe(6);
+
+    const entradas = await get(`/resumo?empresa=${SUPERA}&sentido=entrada`, cabecalhos);
+    expect(entradas.corpo.data.totalDocumentos).toBe(5);
+    expect(entradas.corpo.data.totalValor).toBe(500);
+
+    const docs = await get(`/documentos?empresa=${SUPERA}&sentido=entrada`, cabecalhos);
+    expect(docs.corpo.data.total).toBe(5);
+
+    const campos = await get(`/campos?empresa=${SUPERA}&sentido=entrada`, cabecalhos);
+    expect(campos.corpo.data.notas).toHaveLength(5);
+    expect(campos.corpo.data.temEmpresa).toBe(true);
+
+    const tabela = await get(`/importacoes?empresa=${SUPERA}&sentido=entrada`, cabecalhos);
+    expect(tabela.corpo.data.importacoes.map((l: any) => [l.competencia, l.versao, l.notas])).toEqual([
+      ['2026-02', 2, 3],
+      ['2026-01', 1, 2],
+    ]);
+    expect(tabela.corpo.data.total).toEqual({ notas: 5, valorTotal: 500, tributos: 0 });
+  });
+
+  it('/filtros traz as empresas e, com a empresa, as opções e o sentido do conjunto', async () => {
+    await salvar('2026-03', 1, classificadas(2, 'entrada', 10));
+    const cabecalhos = await sessaoComLote(lote(), false);
+
+    const doLote = await get('/filtros', cabecalhos);
+    expect(doLote.corpo.data.empresa).toBeNull();
+    expect(doLote.corpo.data.empresas).toEqual([{ cnpj: SUPERA, nome: 'SUPERA LTDA', quantidade: 1 }]);
+    expect(doLote.corpo.data.sentidoPadrao).toBe('todas');
+    expect(doLote.corpo.data.totalDocumentos).toBe(4);
+
+    const daEmpresa = await get(`/filtros?empresa=${SUPERA}`, cabecalhos);
+    expect(daEmpresa.corpo.data.empresa).toBe(SUPERA);
+    expect(daEmpresa.corpo.data.totalDocumentos).toBe(2);
+    expect(daEmpresa.corpo.data.cfops).toEqual([{ codigo: '1102', quantidade: 2 }]);
+    expect(daEmpresa.corpo.data.sentidoPadrao).toBe('entrada');
+    expect(daEmpresa.corpo.data.aviso).toBeUndefined();
+  });
+
+  it('empresa sem análises: painel vazio com o aviso', async () => {
+    const cabecalhos = await sessaoComLote(lote(), true);
+    const filtros = await get(`/filtros?empresa=${OUTRO}`, cabecalhos);
+    expect(filtros.status).toBe(200);
+    expect(filtros.corpo.data.totalDocumentos).toBe(0);
+    expect(filtros.corpo.data.aviso).toBe('Nenhuma análise salva desta empresa');
+
+    const tabela = await get(`/importacoes?empresa=${OUTRO}`, cabecalhos);
+    expect(tabela.corpo.data.importacoes).toEqual([]);
+    expect(tabela.corpo.data.aviso).toBe('Nenhuma análise salva desta empresa');
+  });
+
+  it('análise excluída depois da carga: a próxima usa a versão anterior', async () => {
+    await salvar('2026-03', 1, classificadas(2, 'entrada', 10));
+    const v2 = await salvar('2026-03', 2, classificadas(5, 'entrada', 10));
+    const cabecalhos = await sessaoComLote(lote(), true);
+    expect((await get(`/resumo?empresa=${SUPERA}`, cabecalhos)).corpo.data.totalDocumentos).toBe(5);
+
+    await excluirAnalises([v2.id], 'teste');
+    expect((await get(`/resumo?empresa=${SUPERA}`, cabecalhos)).corpo.data.totalDocumentos).toBe(2);
+  });
+
+  it('armazenamento fora: 503 com a causa, e o lote atual continua funcionando', async () => {
+    jest.spyOn(loja, 'listar').mockRejectedValue(new ErroSupabase('sem rede'));
+    jest.spyOn(loja, 'listarEmpresas').mockRejectedValue(new ErroSupabase('sem rede'));
+    const cabecalhos = await sessaoComLote(lote(), true);
+
+    for (const rota of ['/resumo', '/filtros', '/campos', '/importacoes', '/documentos']) {
+      const resposta = await get(`${rota}?empresa=${SUPERA}`, cabecalhos);
+      expect(resposta.status).toBe(503);
+      expect(resposta.corpo.error).toMatch(/Restore project/);
+    }
+
+    const filtros = await get('/filtros', cabecalhos);
+    expect(filtros.status).toBe(200);
+    expect(filtros.corpo.data.totalDocumentos).toBe(4);
+    expect(filtros.corpo.data.empresas).toEqual([]);
+    expect(filtros.corpo.data.avisoEmpresas).toMatch(/Restore project/);
+    expect((await get('/resumo', cabecalhos)).corpo.data.totalDocumentos).toBe(4);
+  });
+
+  it('parâmetro inválido: 400', async () => {
+    const cabecalhos = await sessaoComLote(lote(), true);
+    for (const rota of ['/resumo', '/filtros', '/campos', '/importacoes', '/documentos', '/regimes']) {
+      expect((await get(`${rota}?empresa=abc`, cabecalhos)).status).toBe(400);
+    }
+    expect((await get('/importacoes', cabecalhos)).status).toBe(400);
   });
 });
 

@@ -24,6 +24,10 @@ export interface ContextoExportacao {
   empresa?: EmpresaAnalisada;
   /** Tabela de CST e cClassTrib; padrão, a carregada do arquivo */
   tabela?: TabelaReforma;
+  /** De onde vêm as notas, quando não é o lote da sessão (conjunto da empresa) */
+  origem?: string;
+  /** Importações incluídas no conjunto da empresa: viram a aba "Importações" */
+  importacoes?: Array<{ competencia: string; versao: number; criadoEm: string; notas: number }>;
 }
 
 const ROTULO_SENTIDO_FILTRO: Record<string, string> = {
@@ -71,10 +75,34 @@ export class ExcelExportService {
     this.addDocumentosAba(workbook, documentos, temEmpresa);
     this.addPorRegimeAba(workbook, dashboard.porRegime);
     this.addPorFornecedorAba(workbook, dashboard.porFornecedor);
+    if (contexto.importacoes) this.addImportacoesAba(workbook, contexto, cabecalho);
 
     // Gerar buffer
     const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
     return buffer;
+  }
+
+  /** Importações do conjunto da empresa, com o cabeçalho de origem e filtros. */
+  private addImportacoesAba(
+    workbook: XLSX.WorkBook,
+    contexto: ContextoExportacao,
+    cabecalho: (string | number)[][]
+  ): void {
+    const rotulo = (c: string) => (/^\d{4}-\d{2}$/.test(c) ? `${c.slice(5)}/${c.slice(0, 4)}` : 'Sem competência');
+    const linhas = (contexto.importacoes ?? []).map(i => [
+      rotulo(i.competencia),
+      `v${i.versao}`,
+      new Date(i.criadoEm).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+      i.notas,
+    ]);
+    const planilha = XLSX.utils.aoa_to_sheet([
+      ...cabecalho,
+      [],
+      ['Competência', 'Versão', 'Importada em', 'Notas'],
+      ...linhas,
+    ]);
+    planilha['!cols'] = [{ wch: 22 }, { wch: 40 }, { wch: 20 }, { wch: 10 }];
+    XLSX.utils.book_append_sheet(workbook, planilha, 'Importações');
   }
 
   /** Linhas de identificação: empresa, filtros ativos e versão da tabela. */
@@ -86,6 +114,7 @@ export class ExcelExportService {
     const filtros = contexto.filtros ?? {};
     const empresa = contexto.empresa;
     return [
+      ...(contexto.origem ? [['Origem', contexto.origem]] : []),
       [
         'Empresa analisada',
         temEmpresa && empresa ? `${empresa.nome} (${formatarCNPJ(empresa.cnpj)})` : 'Não identificada',
