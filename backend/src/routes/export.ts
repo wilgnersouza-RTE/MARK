@@ -178,11 +178,15 @@ router.get('/json', authenticate, async (req: Request, res: Response) => {
  */
 router.post('/erros-importacao', authenticate, async (req: Request, res: Response) => {
   try {
-    const { erros } = req.body as {
+    const { erros: errosRecebidos, duplicados: duplicadosRecebidos } = req.body as {
       erros?: Array<{ nomeArquivo: string; erro: string }>;
+      /** Notas duplicadas puladas na importação, com o motivo */
+      duplicados?: Array<{ nomeArquivo: string; motivo: string }>;
     };
+    const erros = Array.isArray(errosRecebidos) ? errosRecebidos : [];
+    const duplicados = Array.isArray(duplicadosRecebidos) ? duplicadosRecebidos : [];
 
-    if (!Array.isArray(erros) || erros.length === 0) {
+    if (erros.length === 0 && duplicados.length === 0) {
       return res.status(400).json({
         success: false,
         error: 'Nenhum erro para exportar.',
@@ -190,11 +194,16 @@ router.post('/erros-importacao', authenticate, async (req: Request, res: Respons
       });
     }
 
-    const linhas = erros.map((e, i) => ({
+    // Duplicadas entram na mesma planilha, com o motivo e onde a nota já está.
+    const recusados = [
+      ...erros.map(e => ({ nomeArquivo: e?.nomeArquivo ?? '', motivo: e?.erro ?? '' })),
+      ...duplicados.map(d => ({ nomeArquivo: d?.nomeArquivo ?? '', motivo: `Nota duplicada: ${d?.motivo ?? ''}` })),
+    ];
+    const linhas = recusados.map((e, i) => ({
       '#': i + 1,
       Arquivo: (e.nomeArquivo || '').split('/').pop() || e.nomeArquivo,
       'Caminho no ZIP': e.nomeArquivo,
-      Motivo: e.erro,
+      Motivo: e.motivo,
       'Data da importação': new Date().toLocaleString('pt-BR'),
     }));
 

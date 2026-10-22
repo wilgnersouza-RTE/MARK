@@ -152,6 +152,14 @@ export interface NFeDocument {
   codigoServico?: string;
   /** De que tag veio o código do serviço (cTribNac, item da LC 116, código municipal) */
   tipoCodigoServico?: string;
+  /**
+   * Número da NFS-e ('' quando o XML não traz). Só a NFS-e preenche; com o
+   * prestador e o código de verificação, é a identidade da nota
+   * (utils/identidadeNota.ts). Ausente nas notas lidas antes deste campo.
+   */
+  numeroNfse?: string;
+  /** Código de verificação da NFS-e ('' quando o XML não traz). */
+  codigoVerificacao?: string;
 }
 
 /** CST do IBS/CBS e cClassTrib declarados num item (ou na nota). */
@@ -375,4 +383,12 @@ export interface UserSession {
   analiseOrigem?: 'upload' | 'aberta';
   /** Muda a cada lote carregado; diz se o lote ainda é o mesmo depois de um await */
   loteId?: string;
+  /**
+   * Notas do lote como chegaram (já sem as repetidas no ZIP), antes de
+   * tirar as que a empresa já tinha em outra competência. Cada escolha de
+   * empresa recomeça daqui; uploads e aberturas trocam.
+   */
+  documentosOriginais?: NFeDocument[];
+  /** Caminho no ZIP de cada nota original (id da nota → arquivo) */
+  arquivoDe?: Record<string, string>;
 }

@@ -612,3 +612,37 @@ describe('parseNFE: revisão da conferência de tributos', () => {
     expect(seletivo.valorNumerico).toBe(3);
   });
 });
+
+describe('parseNFE: número e código de verificação da NFS-e (identidade)', () => {
+  it('ABRASF: número da NumeroNfse, sem código de verificação', async () => {
+    const doc = await nfeParserService.parseNFE(NFSE);
+    expect(doc.numeroNfse).toBe('123');
+    expect(doc.codigoVerificacao).toBe('');
+  });
+
+  it('ABRASF com <Numero> em InfNfse: não confunde com o número do endereço', async () => {
+    const xml = NFSE.replace('<NumeroNfse>123</NumeroNfse>', '<Numero>77</Numero><CodigoVerificacao>X1Y2</CodigoVerificacao>').replace(
+      '<RazaoSocialTomador>',
+      '<Endereco><Numero>999</Numero></Endereco><RazaoSocialTomador>'
+    );
+    const doc = await nfeParserService.parseNFE(xml);
+    expect(doc.numeroNfse).toBe('77');
+    expect(doc.codigoVerificacao).toBe('X1Y2');
+  });
+
+  it('Paulistana: NumeroNFe e CodigoVerificacao separados', async () => {
+    const doc = await nfeParserService.parseNFE(NFSE_PAULISTANA);
+    expect(doc.numeroNfse).toBe('10');
+    expect(doc.codigoVerificacao).toBe('ABCD1234');
+  });
+
+  it('municipal com grupos: <Numero> filho da raiz', async () => {
+    const doc = await nfeParserService.parseNFE(nfseComGrupos(''));
+    expect(doc.numeroNfse).toBe('5');
+  });
+
+  it('CT-e não preenche os campos da NFS-e', async () => {
+    const doc = await nfeParserService.parseNFE(CTE_CARGA);
+    expect(doc.numeroNfse).toBeUndefined();
+  });
+});

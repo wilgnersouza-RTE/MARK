@@ -148,6 +148,60 @@ destinatária ou tomadora), saída (a empresa é emitente) ou sem vínculo. Quan
 a empresa não é clara, a resposta traz `precisaEscolherEmpresa` e os
 `candidatosEmpresa`.
 
+#### Bloqueio de XMLs duplicados
+
+Cada nota tem uma identidade (`backend/src/utils/identidadeNota.ts`):
+
+- NF-e, NFC-e e CT-e: a chave de acesso de 44 dígitos.
+- NFS-e: CNPJ do prestador + código de verificação. Sem código, CNPJ do
+  prestador + número + ano de emissão, porque há municípios que reiniciam a
+  numeração a cada ano. NFS-e salva antes desta regra (sem o número separado)
+  é reconhecida pelo código ou pelo número + ano, conforme o que a chave
+  antiga guardava.
+
+Na importação:
+
+- Repetida no próprio ZIP: a primeira cópia entra, as seguintes são puladas
+  com o motivo "repetido no ZIP".
+- Já importada na mesma empresa: a nota que está na versão mais recente de
+  outra competência dessa empresa é pulada com "já importada em <empresa> ·
+  <competência> · v<n>". A competência do próprio lote não conta: reimportar
+  03/2026 gera uma versão nova com todas as notas. Outras empresas também não
+  contam.
+- Nota emitida no mês da competência do lote nunca é bloqueada por outra
+  competência: uma nota de fevereiro que entrou por engano no lote de março
+  não impede a reimportação de fevereiro (o painel por empresa a conta uma
+  vez).
+- A competência do lote é calculada uma vez, antes de tirar as já
+  importadas, e é com ela que a análise é salva.
+- Nota sem identidade confiável (chave vazia ou "N/A", NFS-e sem prestador ou
+  sem número e código) nunca é bloqueada: entra, e a resposta avisa.
+- Se todas as notas forem duplicadas, o upload responde 400 "Todas as notas
+  deste ZIP já foram importadas" com a lista em `duplicados`, e nada é salvo.
+- Lote sem empresa identificada aplica só a regra do ZIP. Cada escolha de
+  empresa (`/upload/empresa`) recomeça das notas originais do lote: tira as
+  que a empresa escolhida já tem em outra competência e reescreve a análise
+  do lote atual sem elas. Trocar de A para B devolve as notas que A tinha
+  tirado. Se a empresa escolhida já tiver todas as notas, a resposta é 400
+  com `duplicados` e nada muda. Se outro upload ou abertura trocar o lote no
+  meio da escolha, a resposta é 409 "O lote mudou; escolha a empresa de
+  novo."
+- Se a Supabase não responder (ou a leitura passar de 20 s), a importação e a
+  escolha de empresa seguem só com a regra do ZIP e a resposta avisa que a
+  checagem contra as análises salvas não foi feita.
+- A análise onde a nota já está nunca é alterada pela checagem. Só a análise
+  do lote atual é reescrita, sem as duplicadas, na escolha de empresa.
+- Reprocessar não aplica o bloqueio: as notas puladas na importação voltam, e
+  a resposta traz `avisoReprocessamento` ("As N notas puladas na importação
+  por duplicidade voltam no reprocessamento"), que a tela mostra.
+
+O resumo da análise salva guarda `duplicados` (até 500, com o motivo e a
+regra), `duplicadosNoZip` e `duplicadosPulados`: notas salvas + puladas fecham
+com os XMLs lidos. As respostas de `/upload/nfe` e `/upload/empresa` trazem
+`duplicados` (arquivo, motivo, regra e, na regra da empresa, a análise de
+origem) e `avisoDuplicidade`; o upload traz também `avisoSemIdentidade`. A
+planilha de `/export/erros-importacao` aceita `duplicados` junto de `erros`.
+
 ### Análises salvas
 | Método | Rota                                   | Descrição                                   |
 | ------ | -------------------------------------- | ------------------------------------------- |
@@ -255,7 +309,7 @@ Para quem administra o projeto Supabase:
 | ------ | ----------------------------------- | ---------------------- |
 | GET    | `/api/v1/export/excel`              | Planilha do recorte filtrado |
 | GET    | `/api/v1/export/json`               | JSON completo (sem filtros) |
-| POST   | `/api/v1/export/erros-importacao`   | Planilha dos XMLs recusados |
+| POST   | `/api/v1/export/erros-importacao`   | Planilha dos XMLs recusados e das notas duplicadas (`{ erros, duplicados }`) |
 
 O Excel traz as abas Resumo, Documentos, Por Regime, Fornecedores,
 Pendências de tributos e Consolidado por campo. As duas últimas têm no

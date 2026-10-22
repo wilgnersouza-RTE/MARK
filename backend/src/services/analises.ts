@@ -118,6 +118,8 @@ export interface LoteLido {
   quantidadeArquivos: number;
   arquivosProcessados: number;
   arquivosComErro: number;
+  /** Caminho no ZIP de cada nota lida (id da nota → arquivo) */
+  arquivoDe?: Record<string, string>;
 }
 
 /** O conteúdo não é um ZIP legível. */
@@ -142,6 +144,7 @@ export async function lerLoteZip(conteudo: Buffer): Promise<LoteLido> {
 
   const documentos: NFeDocument[] = [];
   const erros: ErroProcessamento[] = [];
+  const arquivoDe: Record<string, string> = {};
 
   for (const [nomeArquivo, file] of Object.entries(zip.files)) {
     if (file.dir) continue;
@@ -157,7 +160,9 @@ export async function lerLoteZip(conteudo: Buffer): Promise<LoteLido> {
         continue;
       }
 
-      documentos.push(await nfeParserService.parseNFE(conteudoXML));
+      const documento = await nfeParserService.parseNFE(conteudoXML);
+      arquivoDe[documento.id] = nomeArquivo;
+      documentos.push(documento);
     } catch (erro: any) {
       erros.push({ nomeArquivo, erro: erro.message });
     }
@@ -169,6 +174,7 @@ export async function lerLoteZip(conteudo: Buffer): Promise<LoteLido> {
     quantidadeArquivos: Object.keys(zip.files).length,
     arquivosProcessados: documentos.length,
     arquivosComErro: erros.length,
+    arquivoDe,
   };
 }
 
@@ -275,6 +281,45 @@ interface DadosNovaAnalise {
   nomeArquivo?: string;
   reprocessadaDe?: string;
   derivadaDe?: string;
+  /** Competência do lote, calculada antes de tirar as duplicadas; sem ela, a das notas */
+  competencia?: string;
+  /** Notas duplicadas puladas na importação */
+  duplicados?: DuplicadasDoLote;
+}
+
+/** Duplicada guardada no resumo da análise. */
+export interface DuplicadoResumo {
+  nomeArquivo: string;
+  motivo: string;
+  regra?: 'zip' | 'analise';
+}
+
+/** Duplicadas de um lote: as repetidas no ZIP (e quantas eram) e as que a empresa já tinha. */
+interface DuplicadasDoLote {
+  noZip: DuplicadoResumo[];
+  totalNoZip: number;
+  daEmpresa: DuplicadoResumo[];
+}
+
+/**
+ * Campos do resumo sobre as duplicadas: a lista (até o teto dos recusados)
+ * e as contagens explícitas, para notas salvas + puladas fecharem com os
+ * XMLs lidos.
+ */
+function camposDuplicados(d: DuplicadasDoLote) {
+  return {
+    duplicados: [...d.noZip, ...d.daEmpresa]
+      .slice(0, MAXIMO_ERROS_GUARDADOS)
+      .map(x => ({ nomeArquivo: x.nomeArquivo, motivo: x.motivo, ...(x.regra ? { regra: x.regra } : {}) })),
+    duplicadosNoZip: d.totalNoZip,
+    duplicadosPulados: d.totalNoZip + d.daEmpresa.length,
+  };
+}
+
+/** As repetidas no ZIP que o resumo de uma análise guardou. */
+function noZipDoResumo(resumo: ResumoAnaliseSalva): { noZip: DuplicadoResumo[]; totalNoZip: number } {
+  const noZip = (resumo.duplicados ?? []).filter(d => d.regra !== 'analise');
+  return { noZip, totalNoZip: resumo.duplicadosNoZip ?? noZip.length };
 }
 
 function montarResumo(dados: DadosNovaAnalise): ResumoAnaliseSalva {
@@ -289,6 +334,9 @@ function montarResumo(dados: DadosNovaAnalise): ResumoAnaliseSalva {
     empresaInferida: dados.empresa?.inferida,
     ...(dados.reprocessadaDe ? { reprocessadaDe: dados.reprocessadaDe } : {}),
     ...(dados.derivadaDe ? { derivadaDe: dados.derivadaDe } : {}),
+    ...(dados.duplicados && dados.duplicados.totalNoZip + dados.duplicados.daEmpresa.length > 0
+      ? camposDuplicados(dados.duplicados)
+      : {}),
   };
 }
 
@@ -299,7 +347,7 @@ function montarResumo(dados: DadosNovaAnalise): ResumoAnaliseSalva {
  */
 async function gravarNovaAnalise(dados: DadosNovaAnalise): Promise<AnaliseSalva> {
   const empresaCnpj = normalizarCnpj(dados.empresa?.cnpj);
-  const competencia = calcularCompetencia(dados.documentos);
+  const competencia = dados.competencia ?? calcularCompetencia(dados.documentos);
   let versaoTabela: string | null = null;
   try {
     versaoTabela = tabelaCarregada().versao;
@@ -354,7 +402,15 @@ function salva(analise: AnaliseSalva): ResultadoSalvar {
  */
 export async function salvarAposUpload(
   sessao: UserSession,
-  dados: { zip: Buffer; criadoPor: string; lote: Omit<LoteLido, 'documentos'>; nomeArquivo?: string }
+  dados: {
+    zip: Buffer;
+    criadoPor: string;
+    lote: Omit<LoteLido, 'documentos'>;
+    nomeArquivo?: string;
+    /** Competência do lote antes de tirar as duplicadas */
+    competencia?: string;
+    duplicados?: DuplicadoResumo[];
+  }
 ): Promise<ResultadoSalvar> {
   const { sessionId, loteId } = sessao;
   const documentos = sessao.documentos;
@@ -368,6 +424,12 @@ export async function salvarAposUpload(
       criadoPor: dados.criadoPor,
       lote: dados.lote,
       nomeArquivo: dados.nomeArquivo,
+      competencia: dados.competencia,
+      duplicados: {
+        noZip: (dados.duplicados ?? []).filter(d => d.regra !== 'analise'),
+        totalNoZip: (dados.duplicados ?? []).filter(d => d.regra !== 'analise').length,
+        daEmpresa: (dados.duplicados ?? []).filter(d => d.regra === 'analise'),
+      },
     });
     sessionService.vincularAnalise(sessionId, loteId, analise.id, 'upload');
     return salva(analise);
@@ -384,8 +446,17 @@ export async function salvarAposUpload(
  *     classificação das notas e, se mudar, competência e versão).
  *   - Análise aberta da lista: não é reescrita. A troca gera uma versão
  *     nova, com o mesmo ZIP, e a sessão passa a apontar para ela.
+ *
+ * `duplicados` são as notas que a empresa escolhida já tinha em outra
+ * competência (já fora do lote): substituem as da escolha anterior, e as
+ * repetidas no ZIP continuam. `competencia` é a do lote antes de tirá-las.
  */
-export async function atualizarAposTrocaEmpresa(sessao: UserSession, criadoPor?: string): Promise<ResultadoSalvar> {
+export async function atualizarAposTrocaEmpresa(
+  sessao: UserSession,
+  criadoPor?: string,
+  opcoes: { duplicados?: DuplicadoResumo[]; competencia?: string } = {}
+): Promise<ResultadoSalvar> {
+  const daEmpresa = opcoes.duplicados ?? [];
   const { sessionId, analiseId, analiseOrigem, loteId } = sessao;
   const documentos = sessao.documentos;
   const empresa = sessao.empresa ?? null;
@@ -432,13 +503,15 @@ export async function atualizarAposTrocaEmpresa(sessao: UserSession, criadoPor?:
         },
         nomeArquivo: resumo.nomeArquivo,
         derivadaDe: atual.id,
+        competencia: opcoes.competencia,
+        duplicados: { ...noZipDoResumo(resumo), daEmpresa },
       });
       sessionService.vincularAnalise(sessionId, loteId, nova.id, 'upload');
       return salva(nova);
     }
 
     const empresaCnpj = normalizarCnpj(empresa?.cnpj);
-    const competencia = calcularCompetencia(documentos);
+    const competencia = opcoes.competencia ?? calcularCompetencia(documentos);
     const mudouChave = empresaCnpj !== atual.empresaCnpj || competencia !== atual.competencia;
 
     for (let tentativa = 1; ; tentativa++) {
@@ -455,6 +528,8 @@ export async function atualizarAposTrocaEmpresa(sessao: UserSession, criadoPor?:
               ...atual.resumo,
               porSentido: contarPorSentido(documentos),
               empresaInferida: empresa?.inferida,
+              porModelo: contarPorModelo(documentos),
+              ...camposDuplicados({ ...noZipDoResumo(atual.resumo), daEmpresa }),
             },
             zipPath: atual.zipPath ? caminhoDoZip(empresaCnpj, competencia, atual.id) : null,
           },
@@ -530,7 +605,10 @@ export async function abrirNaSessao(id: string, sessionId: string) {
  * a tabela de cClassTrib atuais. A empresa da análise original é mantida
  * quando ainda aparece no lote; senão, o lote a identifica de novo.
  */
-export async function reprocessar(id: string, criadoPor: string): Promise<AnalisePublica> {
+export async function reprocessar(
+  id: string,
+  criadoPor: string
+): Promise<AnalisePublica & { avisoReprocessamento?: string }> {
   const loja = armazenamentoAnalises();
   const registro = await loja.obter(id);
   if (!registro) throw new ErroAnaliseInexistente(id);
@@ -570,7 +648,18 @@ export async function reprocessar(id: string, criadoPor: string): Promise<Analis
     reprocessadaDe: registro.analise.id,
   });
 
-  return resumoPublico(analise);
+  // O reprocessamento não aplica o bloqueio de duplicados (decisão do
+  // usuário): as notas puladas na importação voltam, e a tela avisa.
+  const resumoOriginal = registro.analise.resumo;
+  const puladas = resumoOriginal.duplicadosPulados ?? resumoOriginal.duplicados?.length ?? 0;
+  const avisoReprocessamento =
+    puladas === 0
+      ? undefined
+      : puladas === 1
+        ? 'A nota pulada na importação por duplicidade volta no reprocessamento.'
+        : `As ${puladas} notas puladas na importação por duplicidade voltam no reprocessamento.`;
+
+  return { ...resumoPublico(analise), ...(avisoReprocessamento ? { avisoReprocessamento } : {}) };
 }
 
 // ==================== Excluir ====================

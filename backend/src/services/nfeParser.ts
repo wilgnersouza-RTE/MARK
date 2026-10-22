@@ -583,6 +583,9 @@ export class NFEParserService {
       diaEmissao,
       leiaute: this.leiauteDaNFSe(raiz),
       ...this.codigoServicoDaNFSe(raiz),
+      // Separados da chave: a identidade da NFS-e é prestador + número + código.
+      numeroNfse: this.numeroDaNFSe(raiz),
+      codigoVerificacao: this.textoDe(raiz, ['CodigoVerificacao']),
     };
   }
 
@@ -674,6 +677,25 @@ export class NFEParserService {
    * de resposta não mudem o rótulo. A busca ignora maiúsculas, então Nfse
    * (ABRASF) e NFSe (municipal) só se separam pelo CompNfse.
    */
+  /**
+   * Número da NFS-e. No ABRASF ele é a tag <Numero> filha direta de
+   * <InfNfse>; no leiaute municipal com grupos, filha direta da raiz <NFSe>.
+   * Procurada em qualquer nível, <Numero> pegaria o do endereço.
+   */
+  private numeroDaNFSe(raiz: any): string {
+    const direto = this.textoDe(raiz, ['NumeroNfse', 'NumeroNFe', 'nNFSe']);
+    if (direto) return direto;
+    const nos = [this.buscar(raiz, ['InfNfse']), ...Object.values(raiz && typeof raiz === 'object' ? raiz : {})];
+    for (const bruto of nos) {
+      const no = this.no(bruto);
+      if (!no || typeof no !== 'object') continue;
+      const chave = Object.keys(no).find(k => k.toLowerCase() === 'numero');
+      const numero = chave ? this.texto(no[chave]) : '';
+      if (numero) return numero;
+    }
+    return '';
+  }
+
   private leiauteDaNFSe(raiz: any): string {
     const tem = (nomes: string[]) => this.buscar(raiz, nomes) !== undefined;
     if (tem(['DPS', 'nNFSe', 'cTribNac'])) return 'Padrão nacional';

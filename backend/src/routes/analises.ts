@@ -154,8 +154,15 @@ router.post('/:id/abrir', authenticate, async (req: Request, res: Response) => {
  */
 router.post('/:id/reprocessar', authenticate, async (req: Request, res: Response) => {
   try {
-    const analise = await reprocessar(req.params.id, req.user?.email || req.user?.userId || 'desconhecido');
-    res.json({ success: true, data: { analise }, timestamp: agora() });
+    const { avisoReprocessamento, ...analise } = await reprocessar(
+      req.params.id,
+      req.user?.email || req.user?.userId || 'desconhecido'
+    );
+    res.json({
+      success: true,
+      data: { analise, ...(avisoReprocessamento ? { avisoReprocessamento } : {}) },
+      timestamp: agora(),
+    });
   } catch (erro) {
     if (erro instanceof ErroAnaliseInexistente) {
       return res.status(404).json({ success: false, error: erro.message, timestamp: agora() });

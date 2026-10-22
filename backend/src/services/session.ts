@@ -93,7 +93,8 @@ export class SessionService {
     sessionId: string,
     documentos: NFeDocument[],
     importacao: ImportacaoArquivo,
-    empresa: EmpresaAnalisada | null
+    empresa: EmpresaAnalisada | null,
+    lote: { originais?: NFeDocument[]; arquivoDe?: Record<string, string> } = {}
   ): Promise<UserSession> {
     const sessao = this.sessions.get(sessionId);
 
@@ -107,6 +108,8 @@ export class SessionService {
     // as notas ficam com sentido indefinido até o contador escolher.
     sessao.empresa = empresa ?? undefined;
     sessao.documentos = classificarSentido(documentos, empresa?.cnpj);
+    sessao.documentosOriginais = lote.originais ?? documentos;
+    sessao.arquivoDe = lote.arquivoDe;
     // O vínculo com a análise salva é de quem chamou: o lote novo ainda não tem.
     sessao.analiseId = undefined;
     sessao.analiseOrigem = undefined;
@@ -163,6 +166,36 @@ export class SessionService {
   }
 
   /**
+   * Define a empresa e troca as notas do lote por `documentos` (as
+   * originais sem as que a empresa já tinha), reclassificadas. O CNPJ é
+   * validado contra o lote original. Devolve null, sem mudar nada, se o lote
+   * já não é `loteId`.
+   */
+  async aplicarEmpresa(
+    sessionId: string,
+    loteId: string | undefined,
+    cnpj: string,
+    documentos: NFeDocument[]
+  ): Promise<UserSession | null> {
+    const sessao = this.sessions.get(sessionId);
+    if (!sessao) throw new Error('Sessão não encontrada');
+    if (!loteId || sessao.loteId !== loteId) return null;
+
+    const alvo = normalizarCnpj(cnpj);
+    const candidato = alvo
+      ? identificarEmpresa(sessao.documentosOriginais ?? sessao.documentos).todos.find(c => c.cnpj === alvo)
+      : undefined;
+    if (!candidato) throw new ErroEmpresaForaDoLote(cnpj);
+
+    sessao.empresa = { cnpj: candidato.cnpj, nome: candidato.nome, inferida: false };
+    sessao.documentos = classificarSentido(documentos, candidato.cnpj);
+    sessao.importacoes = sessao.importacoes.map(i => ({ ...i, documentos: sessao.documentos }));
+    sessao.dashboard = await dashboardService.generateDashboard(sessao.documentos);
+    sessao.ultimaAtualizacao = new Date().toISOString();
+    return sessao;
+  }
+
+  /**
    * Liga o lote vigente da sessão à análise salva que o guarda, só se o
    * lote ainda for `loteId`: outro upload ou abertura no meio do caminho
    * não pode herdar a análise de um lote que já saiu da sessão.
@@ -212,6 +245,8 @@ export class SessionService {
     sessao.analiseId = undefined;
     sessao.analiseOrigem = undefined;
     sessao.loteId = undefined;
+    sessao.documentosOriginais = undefined;
+    sessao.arquivoDe = undefined;
     sessao.dashboard = null;
     sessao.importacoes = [];
     sessao.ultimaAtualizacao = new Date().toISOString();

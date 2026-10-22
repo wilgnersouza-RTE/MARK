@@ -247,11 +247,14 @@ export const AnalisesSalvas: React.FC<{
         { headers: cabecalhos, timeout: TEMPO_REPROCESSAR_MS }
       );
       const nova: AnaliseResumo | undefined = resposta.data?.data?.analise;
+      // O reprocessamento não pula duplicadas: as puladas na importação voltam.
+      const avisoDuplicadas: string | undefined = resposta.data?.data?.avisoReprocessamento;
       setMensagem(
-        nova
+        (nova
           ? `Reprocessada com as regras atuais: versão ${nova.versao} de ${rotuloCompetencia(nova.competencia)} criada. ` +
-              'Clique em Abrir para levá-la ao painel.'
-          : 'Reprocessamento concluído. A lista foi recarregada; clique em Abrir na versão nova para levá-la ao painel.'
+            'Clique em Abrir para levá-la ao painel.'
+          : 'Reprocessamento concluído. A lista foi recarregada; clique em Abrir na versão nova para levá-la ao painel.') +
+          (avisoDuplicadas ? ` ${avisoDuplicadas}` : '')
       );
       setRecarga(r => r + 1);
     } catch (e: any) {

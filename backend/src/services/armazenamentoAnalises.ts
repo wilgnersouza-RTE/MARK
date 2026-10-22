@@ -52,6 +52,12 @@ export interface ResumoAnaliseSalva {
   reprocessadaDe?: string;
   /** Análise aberta de onde esta saiu por troca de empresa */
   derivadaDe?: string;
+  /** Primeiras notas duplicadas puladas na importação, com o motivo e a regra */
+  duplicados?: { nomeArquivo: string; motivo: string; regra?: 'zip' | 'analise' }[];
+  /** Quantas notas repetidas no ZIP foram puladas */
+  duplicadosNoZip?: number;
+  /** Quantas notas foram puladas no total (ZIP + já importadas na empresa) */
+  duplicadosPulados?: number;
 }
 
 export interface AnaliseSalva {
@@ -252,7 +258,8 @@ export class ArmazenamentoAnalisesMemoria implements ArmazenamentoAnalises {
       }
     }
 
-    registro.analise = copia({ ...registro.analise, ...alteracao, zipPath });
+    // As notas podem ter diminuído (duplicadas que saíram na troca de empresa).
+    registro.analise = copia({ ...registro.analise, ...alteracao, zipPath, totalNotas: documentos.length });
     this.registrarVersao(alteracao.empresaCnpj, alteracao.competencia, alteracao.versao);
     registro.documentos = copia(documentos);
     return copia(registro.analise);
@@ -522,6 +529,12 @@ export class ArmazenamentoAnalisesSupabase implements ArmazenamentoAnalises {
     // Some da lista enquanto as notas são regravadas.
     const anterior = deLinha(await this.patch(id, { completa: false }, 'atualizar a análise'));
     await this.gravarNotas(id, documentos, true);
+    // O upsert não apaga as linhas que sobram quando o lote encolheu
+    // (duplicadas que saíram na troca de empresa).
+    await this.rest(`analise_notas?analise_id=eq.${id}&ordem=gte.${documentos.length}`, 'apagar as notas que saíram', {
+      method: 'DELETE',
+      headers: { Prefer: 'return=minimal' },
+    });
 
     let linha: LinhaAnalise;
     try {
@@ -533,6 +546,7 @@ export class ArmazenamentoAnalisesSupabase implements ArmazenamentoAnalises {
           competencia: alteracao.competencia,
           versao: alteracao.versao,
           resumo: alteracao.resumo,
+          total_notas: documentos.length,
           completa: true,
         },
         'atualizar a análise'

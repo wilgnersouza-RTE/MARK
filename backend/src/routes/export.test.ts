@@ -74,6 +74,7 @@ beforeAll(async () => {
 
   await new Promise<void>(pronto => {
     const app = express();
+    app.use(express.json());
     app.use('/api/v1/export', exportRoutes);
     servidor = app.listen(0, () => {
       base = `http://127.0.0.1:${(servidor.address() as AddressInfo).port}/api/v1/export`;
@@ -413,5 +414,39 @@ describe('exportação do conjunto da empresa (?empresa=)', () => {
     const resposta = await fetch(`${base}/excel?empresa=${EMPRESA}`, { headers: cabecalhos });
     expect(resposta.status).toBe(503);
     expect(((await resposta.json()) as any).error).toMatch(/Restore project/);
+  });
+});
+
+describe('POST /export/erros-importacao', () => {
+  async function planilhaDeRecusados(corpo: unknown) {
+    return fetch(`${base}/erros-importacao`, {
+      method: 'POST',
+      headers: { ...cabecalhos, 'Content-Type': 'application/json' },
+      body: JSON.stringify(corpo),
+    });
+  }
+
+  it('traz os duplicados com o motivo junto dos recusados', async () => {
+    const resposta = await planilhaDeRecusados({
+      erros: [{ nomeArquivo: 'pedido.xml', erro: 'XML não contém valores de nota fiscal' }],
+      duplicados: [
+        { nomeArquivo: 'copia/a.xml', motivo: 'repetido no ZIP' },
+        { nomeArquivo: 'f1.xml', motivo: 'já importada em EMPRESA · 02/2026 · v1' },
+      ],
+    });
+
+    expect(resposta.status).toBe(200);
+    const livro = XLSX.read(Buffer.from(await resposta.arrayBuffer()), { type: 'buffer' });
+    const motivos = linhas(livro, 'Arquivos recusados').slice(1).map(l => [l[2], l[3]]);
+    expect(motivos).toEqual([
+      ['pedido.xml', 'XML não contém valores de nota fiscal'],
+      ['copia/a.xml', 'Nota duplicada: repetido no ZIP'],
+      ['f1.xml', 'Nota duplicada: já importada em EMPRESA · 02/2026 · v1'],
+    ]);
+  });
+
+  it('só com duplicados também gera a planilha; sem nada, 400', async () => {
+    expect((await planilhaDeRecusados({ duplicados: [{ nomeArquivo: 'a.xml', motivo: 'repetido no ZIP' }] })).status).toBe(200);
+    expect((await planilhaDeRecusados({ erros: [], duplicados: [] })).status).toBe(400);
   });
 });

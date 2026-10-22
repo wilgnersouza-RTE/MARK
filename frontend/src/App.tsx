@@ -64,6 +64,19 @@ interface ResumoLote {
   analiseSalva?: boolean;
   /** Orientação para a tela quando a análise não foi salva */
   avisoAnalise?: string;
+  /** Notas duplicadas puladas (repetidas no ZIP ou já importadas na empresa) */
+  duplicados?: NotaDuplicada[];
+  /** Resumo dos duplicados, notas sem identidade e checagem não feita */
+  avisoDuplicidade?: string;
+}
+
+/** Nota pulada na importação por já existir, com o motivo. */
+interface NotaDuplicada {
+  nomeArquivo: string;
+  chaveNFe?: string;
+  modelo?: string;
+  regra?: 'zip' | 'analise';
+  motivo: string;
 }
 
 
@@ -374,6 +387,15 @@ const UploadSection: React.FC<{
   // Arquivos do ZIP que não puderam ser lidos, com o motivo.
   const [rejeitados, setRejeitados] = useState<ArquivoRejeitado[]>(rejeitadosIniciais);
   const [baixandoErros, setBaixandoErros] = useState(false);
+  // Notas puladas por duplicidade, com o motivo, e o aviso que as resume.
+  const [duplicados, setDuplicados] = useState<NotaDuplicada[]>([]);
+  const [avisoDuplicidade, setAvisoDuplicidade] = useState<string | null>(null);
+  // Aviso do upload sobre notas sem identidade: continua valendo depois da escolha de empresa.
+  const [avisoSemIdentidade, setAvisoSemIdentidade] = useState<string | null>(null);
+
+  /** Troca as "já importadas" pelas da empresa escolhida; as repetidas no ZIP ficam. */
+  const trocarDuplicadosDaEmpresa = (novos: NotaDuplicada[]) =>
+    setDuplicados(atuais => [...atuais.filter(d => d.regra !== 'analise'), ...novos]);
   // Quantos documentos da importação anterior foram descartados.
   const [substituidos, setSubstituidos] = useState(0);
   // Resumo do lote vigente: modelos, sentidos e empresa analisada.
@@ -428,11 +450,20 @@ const UploadSection: React.FC<{
           setAvisoAnalise(anterior => aviso ?? anterior);
         }
         onLoteMudou?.({ analiseId: analiseSalva ? analise?.id ?? null : null, naoSalvo: !analiseSalva });
+        // Cada escolha recomeça do lote original: as já importadas da
+        // empresa anterior saem da lista e entram as da empresa escolhida.
+        trocarDuplicadosDaEmpresa(atualizado.duplicados ?? []);
+        const avisos = [atualizado.avisoDuplicidade, avisoSemIdentidade].filter(Boolean);
+        setAvisoDuplicidade(avisos.length > 0 ? avisos.join(' ') : null);
       }
       setAlterandoEmpresa(false);
       await onUploadSuccess();
     } catch (error: any) {
       setErroEmpresa(error.response?.data?.error || 'Não foi possível trocar a empresa analisada.');
+      // Empresa que já tem todas as notas: a lista mostra quais e onde estão.
+      if (Array.isArray(error.response?.data?.duplicados)) {
+        trocarDuplicadosDaEmpresa(error.response.data.duplicados);
+      }
     } finally {
       setSalvandoEmpresa(false);
     }
@@ -449,7 +480,7 @@ const UploadSection: React.FC<{
     try {
       const resposta = await axios.post(
         `${API_URL}/api/v1/export/erros-importacao`,
-        { erros: rejeitados },
+        { erros: rejeitados, duplicados },
         {
           headers: { Authorization: `Bearer ${token}`, 'x-session-id': sessionId },
           responseType: 'blob',
@@ -479,6 +510,9 @@ const UploadSection: React.FC<{
     setIsUploading(true);
     setUploadError(null);
     setRejeitados([]);
+    setDuplicados([]);
+    setAvisoDuplicidade(null);
+    setAvisoSemIdentidade(null);
     setSubstituidos(0);
     setLote(null);
     setAvisoAnalise(null);
@@ -503,6 +537,9 @@ const UploadSection: React.FC<{
         // Importação parcial: alguns XMLs entraram, outros foram recusados.
         // Antes isso passava em silêncio e o usuário só via o total errado.
         setRejeitados(response.data.data?.erros ?? []);
+        setDuplicados(response.data.data?.importacao?.duplicados ?? []);
+        setAvisoDuplicidade(response.data.data?.importacao?.avisoDuplicidade ?? null);
+        setAvisoSemIdentidade(response.data.data?.importacao?.avisoSemIdentidade ?? null);
         setLote(response.data.data?.importacao ?? null);
         setAvisoAnalise(response.data.data?.importacao?.avisoAnalise ?? null);
         onLoteMudou?.({
@@ -514,10 +551,13 @@ const UploadSection: React.FC<{
       } else {
         setUploadError(response.data.error);
         setRejeitados(response.data.details ?? []);
+        setDuplicados(response.data.duplicados ?? []);
       }
     } catch (error: any) {
       setUploadError(error.response?.data?.error || error.message);
       setRejeitados(error.response?.data?.details ?? []);
+      // "Todas as notas deste ZIP já foram importadas" vem com a lista.
+      setDuplicados(error.response?.data?.duplicados ?? []);
     } finally {
       setIsUploading(false);
     }
@@ -745,6 +785,47 @@ const UploadSection: React.FC<{
               <p className="mt-2 text-xs text-amber-800">
                 e mais {rejeitados.length - 8}.
               </p>
+            )}
+          </div>
+        )}
+
+        {avisoDuplicidade && (
+          <p className="mt-4 flex items-start gap-2 rounded-lg border border-amber-400/60 bg-amber-50 px-3 py-2 text-left text-xs text-amber-900">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+            <span>{avisoDuplicidade}</span>
+          </p>
+        )}
+
+        {duplicados.length > 0 && (
+          <div className="mt-4 rounded-lg border border-marca-azul/40 bg-marca-azul/5 p-4 text-left">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="flex items-center gap-2 text-sm font-semibold text-tinta-forte">
+                <AlertTriangle size={16} className="text-marca-azul" />
+                {duplicados.length} nota{duplicados.length > 1 ? 's' : ''} duplicada
+                {duplicados.length > 1 ? 's' : ''} não entr{duplicados.length > 1 ? 'aram' : 'ou'} na análise
+              </p>
+
+              {/* Com recusados, o botão de lá já leva os duplicados na mesma planilha. */}
+              {rejeitados.length === 0 && (
+                <button
+                  onClick={exportarErros}
+                  disabled={baixandoErros}
+                  className="flex items-center gap-1.5 rounded-lg border border-marca-azul/60 px-3 py-1.5 text-xs font-semibold text-marca-azul transition hover:bg-marca-azul/10 disabled:opacity-50"
+                >
+                  <FileSpreadsheet size={14} />
+                  {baixandoErros ? 'Gerando…' : 'Exportar em Excel'}
+                </button>
+              )}
+            </div>
+            <ul className="mt-2 space-y-1">
+              {duplicados.slice(0, 8).map((d, i) => (
+                <li key={i} className="text-xs leading-snug text-tinta-media">
+                  <span className="font-mono">{d.nomeArquivo}</span> — {d.motivo}
+                </li>
+              ))}
+            </ul>
+            {duplicados.length > 8 && (
+              <p className="mt-2 text-xs text-tinta-media">e mais {duplicados.length - 8}.</p>
             )}
           </div>
         )}
