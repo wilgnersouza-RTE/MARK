@@ -57,7 +57,7 @@ async function enviarZip(conteudo: Buffer, cabecalhos: Record<string, string>) {
   return { status: resposta.status, corpo: (await resposta.json()) as any };
 }
 
-async function chamar(metodo: 'GET' | 'POST', caminho: string, cabecalhos: Record<string, string>, corpo?: unknown) {
+async function chamar(metodo: 'GET' | 'POST' | 'DELETE', caminho: string, cabecalhos: Record<string, string>, corpo?: unknown) {
   const resposta = await fetch(`${base}${caminho}`, {
     method: metodo,
     headers: { ...cabecalhos, 'Content-Type': 'application/json' },
@@ -260,5 +260,160 @@ describe('análises salvas pelas rotas', () => {
   it('exige autenticação', async () => {
     const resposta = await fetch(`${base}/analises`);
     expect(resposta.status).toBe(401);
+  });
+
+  describe('exclusão', () => {
+    const INEXISTENTE = '00000000-0000-4000-8000-000000000000';
+
+    it('DELETE /analises/:id exclui; some da lista e o uso diminui; de novo, 404', async () => {
+      const upload = await enviarZip(fs.readFileSync(ZIP_EXEMPLO), novaSessao());
+      const id = upload.corpo.data.importacao.analise.id;
+      const usoAntes = (await chamar('GET', '/analises/uso', novaSessao())).corpo.data;
+
+      const resposta = await chamar('DELETE', `/analises/${id}`, novaSessao());
+      expect(resposta.status).toBe(200);
+      expect(resposta.corpo.data).toEqual(
+        expect.objectContaining({ excluidas: [id], naoEncontradas: [], bytesLiberados: usoAntes.bytesZips })
+      );
+
+      expect((await chamar('GET', '/analises', novaSessao())).corpo.data).toHaveLength(0);
+      expect((await chamar('GET', '/analises/uso', novaSessao())).corpo.data).toEqual(
+        expect.objectContaining({ analises: 0, bytesZips: 0 })
+      );
+      expect((await chamar('DELETE', `/analises/${id}`, novaSessao())).status).toBe(404);
+      expect((await chamar('DELETE', '/analises/nao-e-uuid', novaSessao())).status).toBe(400);
+    });
+
+    it('POST /analises/excluir exclui em lote, informa os não encontrados e o espaço liberado', async () => {
+      const ids: string[] = [];
+      for (let i = 0; i < 3; i++) {
+        ids.push((await enviarZip(fs.readFileSync(ZIP_EXEMPLO), novaSessao())).corpo.data.importacao.analise.id);
+      }
+
+      const resposta = await chamar('POST', '/analises/excluir', novaSessao(), { ids: [ids[0], INEXISTENTE, ids[2]] });
+      expect(resposta.status).toBe(200);
+      expect(resposta.corpo.data.excluidas).toEqual([ids[0], ids[2]]);
+      expect(resposta.corpo.data.naoEncontradas).toEqual([INEXISTENTE]);
+      expect(resposta.corpo.data.bytesLiberados).toBe(2 * fs.readFileSync(ZIP_EXEMPLO).length);
+
+      // A versão que ficou mantém o número; a próxima importação não reusa a 3 excluída.
+      const lista = await chamar('GET', '/analises', novaSessao());
+      expect(lista.corpo.data.map((a: any) => [a.id, a.versao])).toEqual([[ids[1], 2]]);
+      const nova = await enviarZip(fs.readFileSync(ZIP_EXEMPLO), novaSessao());
+      expect(nova.corpo.data.importacao.analise.versao).toBe(4);
+    });
+
+    it('recusa lote vazio, com mais de 100 ids ou com id que não é uuid', async () => {
+      const muitos = Array.from({ length: 101 }, () => INEXISTENTE);
+      for (const corpo of [{}, { ids: [] }, { ids: 'x' }, { ids: muitos }, { ids: [INEXISTENTE, 'abc'] }, { ids: [1] }]) {
+        expect((await chamar('POST', '/analises/excluir', novaSessao(), corpo)).status).toBe(400);
+      }
+      const cem = Array.from({ length: 100 }, () => INEXISTENTE);
+      expect((await chamar('POST', '/analises/excluir', novaSessao(), { ids: cem })).status).toBe(200);
+    });
+
+    it('excluir a análise aberta desfaz o vínculo e o painel segue com os dados', async () => {
+      const sessao = novaSessao();
+      const id = (await enviarZip(fs.readFileSync(ZIP_EXEMPLO), sessao)).corpo.data.importacao.analise.id;
+
+      const resposta = await chamar('DELETE', `/analises/${id}`, novaSessao());
+      expect(resposta.corpo.data.sessoesDesvinculadas).toBe(1);
+
+      const resumo = await chamar('GET', '/dashboard/resumo', sessao);
+      expect(resumo.status).toBe(200);
+      // A troca de empresa não tenta mais gravar na análise excluída.
+      const troca = await chamar('POST', '/upload/empresa', sessao, { cnpj: '12345678000190' });
+      expect(troca.status).toBe(200);
+      expect(troca.corpo.data.importacao.analiseSalva).toBe(false);
+    });
+
+    it('ZIP ausente: exclui e devolve o aviso', async () => {
+      const loja = new ArmazenamentoAnalisesMemoria();
+      loja.excluir = async function (this: ArmazenamentoAnalisesMemoria, id: string) {
+        const r = await ArmazenamentoAnalisesMemoria.prototype.excluir.call(this, id);
+        return r && { ...r, zipRemovido: false, avisoZip: 'O ZIP da análise já não existia no armazenamento.' };
+      };
+      definirArmazenamentoAnalises(loja);
+      const id = (await enviarZip(fs.readFileSync(ZIP_EXEMPLO), novaSessao())).corpo.data.importacao.analise.id;
+
+      const resposta = await chamar('DELETE', `/analises/${id}`, novaSessao());
+      expect(resposta.status).toBe(200);
+      expect(resposta.corpo.data.avisos).toEqual([expect.stringMatching(/já não existia/)]);
+      expect(resposta.corpo.data.bytesLiberados).toBe(0);
+    });
+
+    it('Supabase fora: 503 com a causa e o que já tinha saído', async () => {
+      const loja = new ArmazenamentoAnalisesMemoria();
+      definirArmazenamentoAnalises(loja);
+      const a = (await enviarZip(fs.readFileSync(ZIP_EXEMPLO), novaSessao())).corpo.data.importacao.analise.id;
+      const b = (await enviarZip(fs.readFileSync(ZIP_EXEMPLO), novaSessao())).corpo.data.importacao.analise.id;
+      const original = loja.excluir.bind(loja);
+      loja.excluir = async id => {
+        if (id === b) throw new ErroSupabase('Sem resposta da Supabase (fetch failed).');
+        return original(id);
+      };
+
+      const resposta = await chamar('POST', '/analises/excluir', novaSessao(), { ids: [a, b] });
+      expect(resposta.status).toBe(503);
+      expect(resposta.corpo.error).toMatch(/Restore project.*1 análise já tinha sido excluída/);
+      expect(resposta.corpo.data.excluidas).toEqual([a]);
+
+      const individual = await chamar('DELETE', `/analises/${b}`, novaSessao());
+      expect(individual.status).toBe(503);
+    });
+
+    it('exige autenticação para excluir e baixar o ZIP', async () => {
+      const id = '00000000-0000-4000-8000-000000000000';
+      expect((await fetch(`${base}/analises/${id}`, { method: 'DELETE' })).status).toBe(401);
+      expect((await fetch(`${base}/analises/excluir`, { method: 'POST' })).status).toBe(401);
+      expect((await fetch(`${base}/analises/${id}/zip`)).status).toBe(401);
+    });
+
+    it('aceita id em maiúsculas e registra no log quem excluiu e quem assumiu a conta', async () => {
+      const id = (await enviarZip(fs.readFileSync(ZIP_EXEMPLO), novaSessao())).corpo.data.importacao.analise.id;
+      const tokenAssumido = jwt.sign(
+        {
+          userId: 'cliente',
+          email: 'cliente@exemplo.com',
+          sessionId: 'sess-assumida',
+          assumidoPor: { userId: 'adm', email: 'admin@exemplo.com' },
+        },
+        config.jwt.secret
+      );
+      const log = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+      try {
+        const resposta = await chamar('DELETE', `/analises/${id.toUpperCase()}`, {
+          Authorization: `Bearer ${tokenAssumido}`,
+          'x-session-id': 'sess-assumida',
+        });
+        expect(resposta.status).toBe(200);
+        expect(resposta.corpo.data.excluidas).toEqual([id]);
+        const linha = log.mock.calls.map(c => String(c[0])).find(l => l.includes('excluiu a análise'));
+        expect(linha).toContain(`cliente@exemplo.com (assumido por admin@exemplo.com) excluiu a análise ${id}`);
+      } finally {
+        log.mockRestore();
+      }
+    });
+
+    it('GET /analises/:id/zip baixa o ZIP guardado com o nome original; 404 sem análise ou sem ZIP', async () => {
+      const original = fs.readFileSync(ZIP_EXEMPLO);
+      const id = (await enviarZip(original, novaSessao())).corpo.data.importacao.analise.id;
+
+      const resposta = await fetch(`${base}/analises/${id}/zip`, { headers: novaSessao() });
+      expect(resposta.status).toBe(200);
+      expect(resposta.headers.get('content-type')).toBe('application/zip');
+      expect(resposta.headers.get('content-disposition')).toContain('filename="lote.zip"');
+      expect(Buffer.from(await resposta.arrayBuffer()).equals(original)).toBe(true);
+
+      const inexistente = '00000000-0000-4000-8000-000000000000';
+      expect((await fetch(`${base}/analises/${inexistente}/zip`, { headers: novaSessao() })).status).toBe(404);
+      expect((await fetch(`${base}/analises/abc/zip`, { headers: novaSessao() })).status).toBe(400);
+
+      const loja = new ArmazenamentoAnalisesMemoria();
+      loja.baixarZip = async () => null;
+      definirArmazenamentoAnalises(loja);
+      const semZip = (await enviarZip(original, novaSessao())).corpo.data.importacao.analise.id;
+      expect((await fetch(`${base}/analises/${semZip}/zip`, { headers: novaSessao() })).status).toBe(404);
+    });
   });
 });

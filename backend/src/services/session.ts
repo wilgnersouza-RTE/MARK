@@ -165,6 +165,22 @@ export class SessionService {
   }
 
   /**
+   * Desfaz, em todas as sessões, o vínculo com uma análise que foi excluída.
+   * As notas continuam na sessão; só deixam de apontar para a análise.
+   * Devolve quantas sessões estavam ligadas a ela.
+   */
+  desvincularAnaliseExcluida(analiseId: string): number {
+    let desvinculadas = 0;
+    for (const sessao of this.sessions.values()) {
+      if (sessao.analiseId !== analiseId) continue;
+      sessao.analiseId = undefined;
+      sessao.analiseOrigem = undefined;
+      desvinculadas++;
+    }
+    return desvinculadas;
+  }
+
+  /**
    * Limpa os dados da sessão (novo upload, recomeça)
    */
   async limparSessao(sessionId: string): Promise<UserSession> {

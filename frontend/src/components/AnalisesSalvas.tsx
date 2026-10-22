@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
-import { AlertTriangle, Archive, ChevronDown, FolderOpen, Loader2, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Archive, ChevronDown, Download, FolderOpen, Loader2, RefreshCw, Trash2 } from 'lucide-react';
 import { API_URL } from '../utils/api';
 import { formatarCNPJ, formatarInteiro } from '../utils/format';
 
@@ -24,6 +24,7 @@ export interface AnaliseResumo {
   nomeArquivo: string | null;
   reprocessadaDe: string | null;
   derivadaDe?: string | null;
+  zipBytes?: number;
 }
 
 interface EmpresaComAnalises {
@@ -57,6 +58,12 @@ const TEMPO_ABRIR_MS = 10 * 60 * 1000;
  */
 const TEMPO_REPROCESSAR_MS = 30 * 60 * 1000;
 
+/** Ids por pedido de exclusão (limite do backend). */
+const MAXIMO_POR_EXCLUSAO = 100;
+
+/** Cada exclusão faz algumas chamadas à Supabase; um lote de 100 leva um tempo. */
+const TEMPO_EXCLUIR_MS = 10 * 60 * 1000;
+
 /** "2026-03" vira "03/2026". */
 export function rotuloCompetencia(competencia: string): string {
   const partes = competencia.match(/^(\d{4})-(\d{2})$/);
@@ -89,7 +96,7 @@ function textoUso(uso: Uso): string {
     const pct = Math.round((uso.bytesBanco / uso.limiteBytesBanco) * 100);
     partes.push(`banco: ${formatarBytes(uso.bytesBanco)} de ${formatarBytes(uso.limiteBytesBanco)} (${pct}%)`);
   }
-  return `Espaço gratuito da Supabase · ${partes.join(' · ')}`;
+  return partes.join(' · ');
 }
 
 const tempoEsgotado = (e: any) => e?.code === 'ECONNABORTED' || /timeout/i.test(String(e?.message ?? ''));
@@ -105,7 +112,9 @@ export const AnalisesSalvas: React.FC<{
   analiseAtualId?: string | null;
   /** O lote no painel não foi salvo: abrir pede confirmação antes */
   loteAtualNaoSalvo?: boolean;
-}> = ({ sessionId, token, versaoLote, onAbrir, analiseAtualId, loteAtualNaoSalvo }) => {
+  /** Análises excluídas: a tela avisa se a que está no painel saiu */
+  onExcluidas?: (ids: string[]) => void;
+}> = ({ sessionId, token, versaoLote, onAbrir, analiseAtualId, loteAtualNaoSalvo, onExcluidas }) => {
   const [empresas, setEmpresas] = useState<EmpresaComAnalises[]>([]);
   const [empresa, setEmpresa] = useState('');
   const [analises, setAnalises] = useState<AnaliseResumo[]>([]);
@@ -120,6 +129,15 @@ export const AnalisesSalvas: React.FC<{
   const [confirmando, setConfirmando] = useState<string | null>(null);
   const [recarga, setRecarga] = useState(0);
   const [retraido, setRetraido] = useState(false);
+  // Ids marcados nas caixas de seleção.
+  const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
+  // Análises cuja exclusão espera "Excluir definitivamente".
+  const [aExcluir, setAExcluir] = useState<AnaliseResumo[] | null>(null);
+  const [excluindo, setExcluindo] = useState(false);
+  // Análise cujo ZIP está sendo baixado.
+  const [baixando, setBaixando] = useState<string | null>(null);
+  const quadroExclusao = useRef<HTMLDivElement>(null);
+  const caixaTodas = useRef<HTMLInputElement>(null);
 
   const cabecalhos = { Authorization: `Bearer ${token}`, 'x-session-id': sessionId };
   const filtroEmpresa = empresa ? { empresa } : {};
@@ -140,7 +158,16 @@ export const AnalisesSalvas: React.FC<{
       .then(([emp, lista, usoRes]) => {
         if (!ativo) return;
         setEmpresas(emp.data.data ?? []);
-        setAnalises(lista.data.data ?? []);
+        const novas: AnaliseResumo[] = lista.data.data ?? [];
+        setAnalises(novas);
+        // A seleção só vale para o que continua na lista.
+        setSelecionadas(atuais => new Set(novas.filter(a => atuais.has(a.id)).map(a => a.id)));
+        // O quadro de confirmação não lista o que já saiu da lista.
+        setAExcluir(atuais => {
+          if (!atuais) return atuais;
+          const restantes = atuais.filter(a => novas.some(n => n.id === a.id));
+          return restantes.length > 0 ? restantes : null;
+        });
         setTemMais(!!lista.data.paginacao?.temMais);
         setUso(usoRes?.data?.data ?? null);
       })
@@ -243,6 +270,164 @@ export const AnalisesSalvas: React.FC<{
     }
   };
 
+  const alternarSelecao = (id: string) => {
+    setSelecionadas(atuais => {
+      const novas = new Set(atuais);
+      if (novas.has(id)) novas.delete(id);
+      else novas.add(id);
+      return novas;
+    });
+  };
+
+  const quantasSelecionadas = analises.filter(a => selecionadas.has(a.id)).length;
+  const todasSelecionadas = analises.length > 0 && quantasSelecionadas === analises.length;
+  const algumasSelecionadas = quantasSelecionadas > 0 && !todasSelecionadas;
+
+  useEffect(() => {
+    if (caixaTodas.current) caixaTodas.current.indeterminate = algumasSelecionadas;
+  }, [algumasSelecionadas]);
+
+  const alternarTodas = () => {
+    setSelecionadas(todasSelecionadas ? new Set() : new Set(analises.map(a => a.id)));
+  };
+
+  // O quadro de confirmação aparece fora da lista rolável: leva o foco e a
+  // tela até ele, para não ficar escondido.
+  const abertoParaExcluir = aExcluir !== null;
+  useEffect(() => {
+    if (!abertoParaExcluir || !quadroExclusao.current) return;
+    quadroExclusao.current.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+    quadroExclusao.current.focus();
+  }, [abertoParaExcluir]);
+
+  /** Só abre o quadro de confirmação; nada é apagado aqui. */
+  const pedirExclusao = (lista: AnaliseResumo[]) => {
+    if (lista.length === 0 || ocupada !== null || excluindo) return;
+    setConfirmando(null);
+    setErro(null);
+    setMensagem(null);
+    setAExcluir(lista);
+  };
+
+  /** Baixa o ZIP guardado, para o usuário ficar com uma cópia antes de excluir. */
+  const baixarZip = async (analise: AnaliseResumo) => {
+    setBaixando(analise.id);
+    setErro(null);
+    try {
+      const resposta = await axios.get(`${API_URL}/api/v1/analises/${analise.id}/zip`, {
+        headers: cabecalhos,
+        responseType: 'blob',
+        timeout: TEMPO_ABRIR_MS,
+      });
+      const disposicao = String(resposta.headers['content-disposition'] ?? '');
+      const utf8 = disposicao.match(/filename\*=UTF-8''([^;]+)/i);
+      const simples = disposicao.match(/filename="([^"]+)"/i);
+      const nome = utf8
+        ? decodeURIComponent(utf8[1])
+        : simples?.[1] ?? `analise-${analise.competencia}-v${analise.versao}.zip`;
+
+      const url = window.URL.createObjectURL(new Blob([resposta.data], { type: 'application/zip' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', nome);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode?.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (e: any) {
+      // Com responseType 'blob', o corpo de erro também chega como Blob.
+      let mensagemErro = 'Não foi possível baixar o ZIP da análise.';
+      try {
+        const texto = await e.response?.data?.text?.();
+        const corpo = texto ? JSON.parse(texto) : null;
+        if (corpo?.error) mensagemErro = corpo.error;
+      } catch {
+        // corpo ilegível: fica a mensagem genérica
+      }
+      setErro(mensagemErro);
+    } finally {
+      setBaixando(null);
+    }
+  };
+
+  /** Chamado só por "Excluir definitivamente". */
+  const excluir = async () => {
+    if (!aExcluir || ocupada !== null) return;
+    const ids = aExcluir.map(a => a.id);
+    setExcluindo(true);
+    setErro(null);
+    setMensagem(null);
+
+    const excluidas: string[] = [];
+    const naoEncontradas: string[] = [];
+    const avisos: string[] = [];
+    let bytesLiberados = 0;
+    let falha: string | null = null;
+    let incerto = false;
+
+    // O servidor aceita até 100 ids por pedido.
+    for (let inicio = 0; inicio < ids.length && !falha; inicio += MAXIMO_POR_EXCLUSAO) {
+      try {
+        const resposta = await axios.post(
+          `${API_URL}/api/v1/analises/excluir`,
+          { ids: ids.slice(inicio, inicio + MAXIMO_POR_EXCLUSAO) },
+          { headers: cabecalhos, timeout: TEMPO_EXCLUIR_MS }
+        );
+        const dados = resposta.data?.data ?? {};
+        excluidas.push(...(dados.excluidas ?? []));
+        naoEncontradas.push(...(dados.naoEncontradas ?? []));
+        avisos.push(...(dados.avisos ?? []));
+        bytesLiberados += dados.bytesLiberados ?? 0;
+      } catch (e: any) {
+        if (!e.response) {
+          // Sem resposta (tempo esgotado ou rede): o servidor pode ter excluído.
+          incerto = true;
+          falha =
+            'Sem resposta do servidor: não dá para saber se as análises foram excluídas. ' +
+            'A lista foi recarregada; confira o que ainda aparece antes de tentar de novo.';
+          break;
+        }
+        const dados = e.response.data?.data;
+        excluidas.push(...(dados?.excluidas ?? []));
+        naoEncontradas.push(...(dados?.naoEncontradas ?? []));
+        avisos.push(...(dados?.avisos ?? []));
+        bytesLiberados += dados?.bytesLiberados ?? 0;
+        falha = e.response.data?.error || 'Não foi possível excluir as análises.';
+      }
+    }
+
+    const sairam = new Set([...excluidas, ...naoEncontradas]);
+    setAnalises(atuais => atuais.filter(a => !sairam.has(a.id)));
+    setSelecionadas(atuais => new Set(Array.from(atuais).filter(id => !sairam.has(id))));
+    setAExcluir(null);
+    setExcluindo(false);
+    // Sem resposta, avisa por todas as pedidas: a do painel pode ter saído.
+    const possivelmenteExcluidas = incerto ? ids.filter(id => !naoEncontradas.includes(id)) : excluidas;
+    if (possivelmenteExcluidas.length > 0) onExcluidas?.(possivelmenteExcluidas);
+
+    if (falha) setErro(falha);
+    const partes: string[] = [];
+    if (excluidas.length > 0) {
+      partes.push(
+        `${formatarInteiro(excluidas.length)} análise${excluidas.length === 1 ? ' excluída' : 's excluídas'}.`
+      );
+      partes.push(
+        bytesLiberados > 0
+          ? `${formatarBytes(bytesLiberados)} de ZIP liberado${excluidas.length === 1 ? '' : 's'}.`
+          : `Nenhum ZIP foi apagado agora: ${excluidas.length === 1 ? 'o ZIP já não existia' : 'os ZIPs já não existiam'} ou não ${excluidas.length === 1 ? 'pôde' : 'puderam'} ser apagado${excluidas.length === 1 ? '' : 's'}.`
+      );
+    }
+    if (naoEncontradas.length > 0) {
+      partes.push(`${formatarInteiro(naoEncontradas.length)} já não existia${naoEncontradas.length === 1 ? '' : 'm'}.`);
+    }
+    partes.push(...avisos);
+    if (partes.length > 0) setMensagem(partes.join(' '));
+    // Empresas e uso do espaço mudam com a exclusão.
+    setRecarga(r => r + 1);
+  };
+
+  const bytesAExcluir = (aExcluir ?? []).reduce((total, a) => total + (a.zipBytes ?? 0), 0);
+
   return (
     <div className="rounded-xl border border-fundo-borda bg-fundo-card p-5 shadow-lg shadow-black/5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -308,6 +493,108 @@ export const AnalisesSalvas: React.FC<{
             </p>
           )}
 
+          {aExcluir && (
+            <div
+              ref={quadroExclusao}
+              role="alertdialog"
+              aria-modal="false"
+              aria-labelledby="titulo-exclusao"
+              tabIndex={-1}
+              onKeyDown={e => {
+                if (e.key === 'Escape' && !excluindo) {
+                  e.stopPropagation();
+                  setAExcluir(null);
+                }
+              }}
+              className="mt-4 rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-900 focus:outline-none focus:ring-2 focus:ring-red-400"
+            >
+              <p id="titulo-exclusao" className="flex items-center gap-2 font-semibold">
+                <AlertTriangle size={16} className="shrink-0" />
+                {aExcluir.length === 1
+                  ? 'Esta análise será excluída, com as notas e o ZIP guardado:'
+                  : `Estas ${formatarInteiro(aExcluir.length)} análises serão excluídas, com as notas e os ZIPs guardados:`}
+              </p>
+              <ul className="mt-2 max-h-40 list-none overflow-y-auto pl-6 text-xs">
+                {aExcluir.map(a => (
+                  <li key={a.id} className="flex flex-wrap items-center gap-2 py-0.5">
+                    <span>
+                      {a.empresaCnpj
+                        ? `${a.empresaNome ?? 'Nome não informado'} (${formatarCNPJ(a.empresaCnpj)})`
+                        : 'Sem empresa definida'}{' '}
+                      · {rotuloCompetencia(a.competencia)} · versão {a.versao} · {formatarInteiro(a.totalNotas)} nota
+                      {a.totalNotas === 1 ? '' : 's'}
+                    </span>
+                    {aExcluir.length === 1 && (
+                      <button
+                        type="button"
+                        onClick={() => baixarZip(a)}
+                        disabled={baixando !== null || excluindo}
+                        className="flex items-center gap-1 rounded-md border border-red-400 px-2 py-0.5 font-semibold transition hover:bg-red-100 disabled:opacity-50"
+                      >
+                        {baixando === a.id ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                        Baixar ZIP
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-xs">
+                Total: {formatarInteiro(aExcluir.length)} análise{aExcluir.length === 1 ? '' : 's'} · espaço liberado
+                (ZIPs): {formatarBytes(bytesAExcluir)}
+              </p>
+              <p className="mt-2 text-xs">
+                {aExcluir.length === 1
+                  ? 'Para guardar uma cópia, baixe o ZIP antes de excluir.'
+                  : 'Para guardar cópias, cancele e baixe antes os ZIPs que quiser manter, pelo botão "Baixar ZIP" de cada análise na lista.'}
+              </p>
+              <p className="mt-2 font-semibold">Confirma esta ação? Ela pode ser irreversível.</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={excluir}
+                  disabled={excluindo || ocupada !== null || baixando !== null}
+                  className="flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+                >
+                  {excluindo ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                  Excluir definitivamente
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAExcluir(null)}
+                  disabled={excluindo}
+                  className="rounded-md border border-red-400 px-3 py-1.5 text-xs font-semibold transition hover:bg-red-100 disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
+
+          {analises.length > 0 && (
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <label className="flex cursor-pointer items-center gap-2 text-tinta-media">
+                <input
+                  ref={caixaTodas}
+                  type="checkbox"
+                  checked={todasSelecionadas}
+                  onChange={alternarTodas}
+                  disabled={excluindo}
+                  className="h-4 w-4 accent-marca-azul"
+                />
+                Selecionar todas as carregadas
+              </label>
+              <button
+                type="button"
+                onClick={() => pedirExclusao(analises.filter(a => selecionadas.has(a.id)))}
+                disabled={quantasSelecionadas === 0 || ocupada !== null || excluindo}
+                className="flex items-center gap-1.5 rounded-lg border border-red-300 px-3 py-1.5 font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-50"
+              >
+                <Trash2 size={14} />
+                Excluir selecionadas ({formatarInteiro(quantasSelecionadas)})
+              </button>
+            </div>
+          )}
+
           <div className="mt-4 max-h-96 overflow-y-auto">
             {carregando && analises.length === 0 ? (
               <p className="flex items-center gap-2 py-4 text-sm text-tinta-suave">
@@ -325,6 +612,15 @@ export const AnalisesSalvas: React.FC<{
                     return (
                       <li key={a.id} className="py-3">
                         <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div className="flex min-w-0 items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={selecionadas.has(a.id)}
+                            onChange={() => alternarSelecao(a.id)}
+                            disabled={excluindo}
+                            aria-label={`Selecionar ${rotuloCompetencia(a.competencia)} versão ${a.versao}`}
+                            className="mt-1 h-4 w-4 shrink-0 accent-marca-azul"
+                          />
                           <div className="min-w-0 text-sm">
                             <p className="font-semibold text-tinta-forte">
                               {rotuloCompetencia(a.competencia)} · versão {a.versao}
@@ -347,11 +643,12 @@ export const AnalisesSalvas: React.FC<{
                               {a.versaoTabela ? ` · tabela v${a.versaoTabela}` : ''}
                             </p>
                           </div>
+                          </div>
                           <div className="flex items-center gap-2">
                             <button
                               type="button"
                               onClick={() => pedirAbertura(a)}
-                              disabled={ocupada !== null}
+                              disabled={ocupada !== null || excluindo || aExcluir !== null}
                               className="flex items-center gap-1.5 rounded-lg bg-marca-azul px-3 py-1.5 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
                             >
                               {ocupada === a.id ? <Loader2 size={14} className="animate-spin" /> : <FolderOpen size={14} />}
@@ -360,12 +657,32 @@ export const AnalisesSalvas: React.FC<{
                             <button
                               type="button"
                               onClick={() => reprocessar(a)}
-                              disabled={ocupada !== null}
+                              disabled={ocupada !== null || excluindo || aExcluir !== null}
                               title="Lê de novo o ZIP guardado com as regras e a tabela atuais e cria a versão seguinte"
                               className="flex items-center gap-1.5 rounded-lg border border-marca-azul/40 px-3 py-1.5 text-xs font-semibold text-marca-azul transition hover:bg-marca-azul/10 disabled:opacity-50"
                             >
                               <RefreshCw size={14} />
                               Reprocessar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => baixarZip(a)}
+                              disabled={baixando !== null || excluindo}
+                              title="Baixa o ZIP original guardado, para ter uma cópia"
+                              className="flex items-center gap-1.5 rounded-lg border border-fundo-borda px-3 py-1.5 text-xs font-semibold text-tinta-media transition hover:border-marca-azul hover:text-marca-azul disabled:opacity-50"
+                            >
+                              {baixando === a.id ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                              Baixar ZIP
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => pedirExclusao([a])}
+                              disabled={ocupada !== null || excluindo}
+                              title="Exclui a análise, as notas e o ZIP guardado (pede confirmação)"
+                              className="flex items-center gap-1.5 rounded-lg border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-50"
+                            >
+                              <Trash2 size={14} />
+                              Excluir
                             </button>
                           </div>
                         </div>
@@ -401,7 +718,7 @@ export const AnalisesSalvas: React.FC<{
                   <button
                     type="button"
                     onClick={carregarMais}
-                    disabled={carregandoMais}
+                    disabled={carregandoMais || excluindo}
                     className="mt-2 flex items-center gap-1.5 rounded-lg border border-fundo-borda px-3 py-1.5 text-xs font-semibold text-tinta-media transition hover:border-marca-azul hover:text-marca-azul disabled:opacity-50"
                   >
                     {carregandoMais && <Loader2 size={14} className="animate-spin" />}

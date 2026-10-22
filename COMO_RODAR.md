@@ -120,52 +120,87 @@ a empresa não é clara, a resposta traz `precisaEscolherEmpresa` e os
 | GET    | `/api/v1/analises/uso`                 | Espaço ocupado e limites do plano gratuito  |
 | POST   | `/api/v1/analises/:id/abrir`           | Carrega a análise na sessão (resposta igual à do upload) |
 | POST   | `/api/v1/analises/:id/reprocessar`     | Gera a versão seguinte do ZIP guardado, com regras e tabela atuais; não abre a versão nova |
+| GET    | `/api/v1/analises/:id/zip`             | Baixa o ZIP original guardado, com o nome do arquivo importado, para guardar uma cópia antes de excluir |
+| DELETE | `/api/v1/analises/:id`                 | Exclui a análise, as notas e o ZIP; resposta com `excluidas`, `naoEncontradas`, `bytesLiberados`, `avisos` e `sessoesDesvinculadas` |
+| POST   | `/api/v1/analises/excluir`             | Exclui em lote: `{ "ids": [...] }`, de 1 a 100 ids; inexistentes voltam em `naoEncontradas` e não impedem os demais |
 
 Códigos de resposta das rotas de análises:
 
 - 400: `empresa` que não é CNPJ de 14 dígitos (com ou sem pontuação) nem
   `sem-empresa`; `offset` ou `limite` inválidos; no reprocessamento, ZIP
-  guardado ausente, ilegível ou sem nenhuma nota.
-- 404: análise inexistente (ou ainda incompleta) em `/abrir` e `/reprocessar`.
+  guardado ausente, ilegível ou sem nenhuma nota; em `/zip` e na exclusão, id
+  que não é uuid; no lote, `ids` vazio, com mais de 100 itens ou com algum id
+  que não é uuid.
+- 404: análise inexistente (ou ainda incompleta) em `/abrir` e `/reprocessar`;
+  análise inexistente em `DELETE /analises/:id`; análise ou ZIP inexistente em
+  `/zip`.
 - 503: o armazenamento falhou. A mensagem diz a causa: projeto pausado ou
-  fora do ar, espaço gratuito esgotado ou chave recusada.
+  fora do ar, espaço gratuito esgotado ou chave recusada. Na exclusão em lote,
+  `data` traz o que já tinha sido excluído antes da falha.
 
 A listagem traz `paginacao: { offset, limite, temMais }`; a tela tem o botão
 "Carregar mais".
 
 Todo upload é salvo como análise: competência é o mês (AAAA-MM) com mais notas
 pelo dia de emissão do XML, e reimportar a mesma empresa e competência cria a
-versão seguinte, sem apagar as anteriores. A resposta do upload e da troca de
+versão seguinte, sem apagar as anteriores. Números de versão nunca são
+reusados: com v1, v2 e v3 de uma empresa em 03/2026, excluir a v3 faz a próxima
+importação virar v4; um número reservado por uma gravação que falhou também é
+pulado. A resposta do upload e da troca de
 empresa traz `analise` (id, competência, versão) e `analiseSalva`; se o
 armazenamento falhar, `analiseSalva` vem `false` com `avisoAnalise` (com a
 causa) e o lote segue só na sessão. Sem a Supabase configurada, `analiseSalva`
-vem `true` com o aviso de que a análise está só em memória. Nenhuma rota
-exclui análise nem ZIP.
+vem `true` com o aviso de que a análise está só em memória. A exclusão
+é feita pelo app, com confirmação (veja abaixo).
 
 Trocar a empresa de um lote importado nesta sessão atualiza a própria análise.
 Trocar a empresa de uma análise aberta da lista não a reescreve: grava uma
 versão nova, com o mesmo ZIP, e o painel passa a apontar para ela.
 
-#### Liberando espaço no plano gratuito
+#### Atualização do banco: rode o schema.sql mais uma vez
+
+Esta versão acrescenta ao `backend/supabase/schema.sql` a tabela
+`analises_versoes`, a função `reservar_versao` (numeração que não reusa
+versões excluídas) e a função `excluir_analise` (apaga notas e análise numa
+transação só). Quem administra o projeto deve rodar o script uma vez no SQL
+Editor da Supabase; ele pode ser rodado de novo sem perder dados. Até lá, o
+backend segue funcionando: sem `reservar_versao`, numera pela maior versão
+gravada + 1 (e então um número excluído pode voltar); sem `excluir_analise`,
+exclui em etapas. O log avisa com "Rode de novo backend/supabase/schema.sql".
+
+#### Excluindo análises e liberando espaço
 
 O plano gratuito da Supabase tem 1 GB para os ZIPs e 500 MB de banco; a área
-"Análises salvas" mostra o uso. Como não existe rota de exclusão, liberar
-espaço é um procedimento manual, feito por quem administra o projeto:
+"Análises salvas" mostra o uso. Para liberar espaço, qualquer usuário
+autenticado exclui análises pelo próprio app:
 
-1. Exporte antes o que vai sair: no Storage, baixe os ZIPs do bucket `lotes`;
-   no SQL Editor, rode um `select` das análises escolhidas e guarde o
-   resultado.
-2. Escolha as análises, de preferência versões antigas já substituídas
-   (`select id, empresa_cnpj, competencia, versao, zip_path from analises
-   order by criado_em`).
-3. No SQL Editor, apague primeiro as notas e depois a análise:
-   `delete from analise_notas where analise_id = '<id>';` e
-   `delete from analises where id = '<id>';`.
-4. No Storage, apague o arquivo de `zip_path` no bucket `lotes`.
-5. Linhas com `completa = false` são gravações interrompidas: não aparecem na
-   tela e podem sair pelo mesmo caminho.
+1. Se quiser guardar uma cópia, clique em "Baixar ZIP" na análise antes de
+   excluir.
+2. Em "Análises salvas", clique em "Excluir" numa análise, ou marque várias
+   (ou "Selecionar todas as carregadas") e clique em "Excluir selecionadas (N)".
+3. A tela lista o que vai sair, o total e o espaço liberado em ZIPs. Nada é
+   apagado até clicar em "Excluir definitivamente"; "Cancelar" ou Esc desiste.
+4. A exclusão apaga as notas, a análise e o ZIP no bucket `lotes`. As versões
+   que ficam mantêm o número, e o número excluído não volta a ser usado.
+5. Se a análise excluída estiver aberta em alguma sessão, o vínculo é desfeito:
+   o painel continua com os dados em memória e a tela avisa que a análise não
+   está mais salva.
+6. O servidor registra no log quem excluiu (e o administrador, se ele assumiu
+   a conta), o id, a empresa, a competência, a versão e o momento (linhas
+   `[análises] ... excluiu a análise ...`).
+7. Se o ZIP já não existir ou não puder ser apagado, a análise sai mesmo
+   assim e a tela mostra o aviso.
 
-A exclusão é irreversível; confira os ids duas vezes antes de rodar.
+A exclusão é irreversível.
+
+Para quem administra o projeto Supabase:
+
+- ZIP que não pôde ser apagado: apague o arquivo de `zip_path` no Storage
+  (bucket `lotes`) pelo painel da Supabase.
+- Linhas com `completa = false` (gravações ou exclusões interrompidas) não
+  aparecem na tela; saem por `DELETE /api/v1/analises/<id>` ou pelo SQL
+  Editor (`select * from excluir_analise('<id>');`), apagando também o
+  arquivo de `zip_path` no Storage.
 
 ### Dashboard
 | Método | Rota                               | Descrição                    |
