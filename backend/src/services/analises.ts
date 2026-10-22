@@ -57,8 +57,8 @@ const CAUSA_INDISPONIVEL =
   'Supabase (supabase.com/dashboard, botão "Restore project") e tente de novo.';
 
 const CAUSA_ESPACO =
-  'o espaço gratuito da Supabase acabou (1 GB de ZIPs ou 500 MB de banco). Libere espaço como ' +
-  'descrito no COMO_RODAR.md ou mude o projeto de plano.';
+  'o espaço gratuito da Supabase acabou (1 GB de ZIPs ou 500 MB de banco). Libere espaço em "Análises salvas": ' +
+  'baixe o ZIP das análises que quiser guardar e exclua as antigas. Ou peça ao administrador para mudar o plano.';
 
 const CAUSA_CHAVE =
   'a Supabase recusou a chave do servidor. Confira se SUPABASE_SERVICE_ROLE_KEY é a chave service_role ' +
@@ -226,9 +226,9 @@ export function calcularCompetencia(documentos: NFeDocument[]): string {
   return melhor ?? SEM_COMPETENCIA;
 }
 
-/** Próxima versão livre para a empresa e a competência. */
+/** Reserva a próxima versão; números já usados, mesmo de análises excluídas, não voltam. */
 export async function proximaVersao(empresaCnpj: string, competencia: string): Promise<number> {
-  return (await armazenamentoAnalises().maiorVersao(empresaCnpj, competencia)) + 1;
+  return armazenamentoAnalises().reservarVersao(empresaCnpj, competencia);
 }
 
 /** Dados da análise que a tela mostra. */
@@ -558,4 +558,98 @@ export async function reprocessar(id: string, criadoPor: string): Promise<Analis
   });
 
   return resumoPublico(analise);
+}
+
+// ==================== Excluir ====================
+
+/** Máximo de análises por pedido de exclusão em lote. */
+export const MAXIMO_EXCLUSAO_LOTE = 100;
+
+export interface ResultadoExclusao {
+  /** Ids excluídos, na ordem do pedido */
+  excluidas: string[];
+  /** Ids pedidos que não existiam */
+  naoEncontradas: string[];
+  /** Bytes de ZIP apagados do armazenamento */
+  bytesLiberados: number;
+  /** ZIPs ausentes ou que não puderam ser apagados */
+  avisos: string[];
+  /** Sessões que estavam com uma das análises aberta e perderam o vínculo */
+  sessoesDesvinculadas: number;
+}
+
+/**
+ * O armazenamento falhou no meio do lote. `parcial` diz o que já tinha
+ * sido excluído antes da falha, para a tela não esconder nada.
+ */
+export class ErroExclusaoInterrompida extends Error {
+  constructor(public parcial: ResultadoExclusao, public causa: unknown) {
+    super(`Exclusão interrompida: ${(causa as any)?.message ?? causa}`);
+    this.name = 'ErroExclusaoInterrompida';
+  }
+}
+
+/**
+ * Exclui as análises pedidas: notas, linha da análise e ZIP. Versões que
+ * ficam não são renumeradas. Sessões ligadas a uma análise excluída perdem
+ * o vínculo e seguem com as notas em memória. Cada exclusão vai para o log
+ * com quem pediu, empresa, competência, versão e momento.
+ *
+ * Ids repetidos contam uma vez. A validação (quantidade, formato) é da rota.
+ */
+export async function excluirAnalises(
+  ids: string[],
+  excluidoPor: string,
+  assumidoPor?: { email?: string; userId?: string }
+): Promise<ResultadoExclusao> {
+  const loja = armazenamentoAnalises();
+  const resultado: ResultadoExclusao = {
+    excluidas: [],
+    naoEncontradas: [],
+    bytesLiberados: 0,
+    avisos: [],
+    sessoesDesvinculadas: 0,
+  };
+  // Administrador agindo pela conta de outro usuário fica no log também.
+  const quem = assumidoPor
+    ? `${excluidoPor} (assumido por ${assumidoPor.email || assumidoPor.userId || 'administrador'})`
+    : excluidoPor;
+
+  // Ids em minúsculas: o mesmo uuid em maiúsculas conta uma vez e casa com a sessão.
+  for (const id of Array.from(new Set(ids.map(i => i.toLowerCase())))) {
+    // O vínculo sai antes: uma troca de empresa simultânea não regrava a análise.
+    const desvinculadas = sessionService.desvincularAnaliseExcluida(id);
+
+    let removida;
+    try {
+      removida = await loja.excluir(id);
+    } catch (erro: any) {
+      console.error(
+        `[análises] Exclusão pedida por ${quem} interrompida em ${id} ` +
+          `(${resultado.excluidas.length} já excluída(s)): ${erro?.message ?? erro}`
+      );
+      throw new ErroExclusaoInterrompida(resultado, erro);
+    }
+
+    if (!removida) {
+      resultado.naoEncontradas.push(id);
+      continue;
+    }
+
+    const { analise, zipRemovido, avisoZip } = removida;
+    resultado.excluidas.push(id);
+    if (zipRemovido) resultado.bytesLiberados += analise.zipBytes;
+    resultado.sessoesDesvinculadas += desvinculadas;
+
+    console.log(
+      `[análises] ${new Date().toISOString()} ${quem} excluiu a análise ${id} ` +
+        `(empresa ${analise.empresaCnpj || 'sem empresa'}, competência ${analise.competencia}, versão ${analise.versao})`
+    );
+    if (avisoZip) {
+      console.warn(`[análises] ${avisoZip}`);
+      resultado.avisos.push(avisoZip);
+    }
+  }
+
+  return resultado;
 }

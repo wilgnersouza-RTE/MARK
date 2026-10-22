@@ -93,10 +93,66 @@ as $$
   );
 $$;
 
+-- Maior versão já usada por empresa + competência. Números de análises
+-- excluídas nunca voltam: a próxima versão parte daqui, não do que sobrou.
+create table if not exists public.analises_versoes (
+  empresa_cnpj text not null,
+  competencia text not null,
+  ultima_versao integer not null,
+  primary key (empresa_cnpj, competencia)
+);
+
+alter table public.analises_versoes enable row level security;
+
+-- Reserva a próxima versão de forma atômica. Na primeira vez de cada
+-- empresa + competência, parte da maior versão já gravada em `analises`.
+-- Número reservado e não usado (gravação que falhou) é pulado, nunca reusado.
+create or replace function public.reservar_versao(p_empresa text, p_competencia text)
+returns integer
+language sql
+volatile
+security definer
+set search_path = public
+as $$
+  insert into public.analises_versoes as v (empresa_cnpj, competencia, ultima_versao)
+  values (
+    p_empresa,
+    p_competencia,
+    coalesce((select max(a.versao) from public.analises a
+              where a.empresa_cnpj = p_empresa and a.competencia = p_competencia), 0) + 1
+  )
+  on conflict (empresa_cnpj, competencia) do update
+    set ultima_versao = greatest(
+      v.ultima_versao,
+      coalesce((select max(a.versao) from public.analises a
+                where a.empresa_cnpj = p_empresa and a.competencia = p_competencia), 0)
+    ) + 1
+  returning ultima_versao;
+$$;
+
+-- Exclui as notas e a análise numa só transação e devolve a linha excluída
+-- (nenhuma linha se a análise não existe). O ZIP o backend apaga depois, no
+-- Storage. Sem esta função (schema antigo), o backend exclui em etapas.
+create or replace function public.excluir_analise(p_id uuid)
+returns setof public.analises
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  delete from public.analise_notas where analise_id = p_id;
+  return query delete from public.analises where id = p_id returning *;
+end;
+$$;
+
 revoke all on function public.empresas_com_analises() from public, anon, authenticated;
 revoke all on function public.uso_armazenamento() from public, anon, authenticated;
 grant execute on function public.empresas_com_analises() to service_role;
 grant execute on function public.uso_armazenamento() to service_role;
+revoke all on function public.excluir_analise(uuid) from public, anon, authenticated;
+grant execute on function public.excluir_analise(uuid) to service_role;
+revoke all on function public.reservar_versao(text, text) from public, anon, authenticated;
+grant execute on function public.reservar_versao(text, text) to service_role;
 
 -- Bucket privado para os ZIPs, em <cnpj>/<competência>/<id da análise>.zip.
 -- O nome é fixo no backend.

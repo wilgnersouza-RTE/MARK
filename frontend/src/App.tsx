@@ -358,7 +358,17 @@ const UploadSection: React.FC<{
   rejeitadosIniciais?: ArquivoRejeitado[];
   /** Avisa qual análise salva está no painel e se o lote ficou sem salvar */
   onLoteMudou?: (info: { analiseId: string | null; naoSalvo: boolean }) => void;
-}> = ({ sessionId, token, onUploadSuccess, loteInicial = null, rejeitadosIniciais = [], onLoteMudou }) => {
+  /** Ids de análises recém-excluídas; se a do lote estiver entre elas, avisa */
+  analisesExcluidas?: string[];
+}> = ({
+  sessionId,
+  token,
+  onUploadSuccess,
+  loteInicial = null,
+  rejeitadosIniciais = [],
+  onLoteMudou,
+  analisesExcluidas,
+}) => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   // Arquivos do ZIP que não puderam ser lidos, com o motivo.
@@ -375,6 +385,18 @@ const UploadSection: React.FC<{
   const [alterandoEmpresa, setAlterandoEmpresa] = useState(false);
   const [salvandoEmpresa, setSalvandoEmpresa] = useState(false);
   const [erroEmpresa, setErroEmpresa] = useState<string | null>(null);
+
+  // A análise deste lote foi excluída: o painel segue com os dados em
+  // memória, mas o lote deixa de estar salvo.
+  useEffect(() => {
+    const id = lote?.analise?.id;
+    if (!id || !analisesExcluidas?.includes(id)) return;
+    setLote(atual => (atual ? { ...atual, analise: null, analiseSalva: false } : atual));
+    setAvisoAnalise(
+      'A análise aberta foi excluída das análises salvas. Os dados continuam no painel só nesta sessão; ' +
+        'para salvá-los de novo, importe o ZIP outra vez.'
+    );
+  }, [analisesExcluidas]);
 
   /**
    * Troca a empresa analisada. O servidor reclassifica as notas já
@@ -1312,6 +1334,8 @@ const App: React.FC = () => {
   const [analiseAtualId, setAnaliseAtualId] = useState<string | null>(null);
   // O lote no painel não foi salvo: abrir outra análise o descarta.
   const [loteNaoSalvo, setLoteNaoSalvo] = useState(false);
+  // Últimas análises excluídas, para o card de importação avisar se a dele saiu.
+  const [analisesExcluidas, setAnalisesExcluidas] = useState<string[]>([]);
 
   /**
    * Troca a sessão pela de outro usuário, a pedido do administrador.
@@ -1440,6 +1464,7 @@ const App: React.FC = () => {
             setAnaliseAtualId(analiseId);
             setLoteNaoSalvo(naoSalvo);
           }}
+          analisesExcluidas={analisesExcluidas}
         />
 
         <div className="mt-8">
@@ -1454,6 +1479,14 @@ const App: React.FC = () => {
               setAnaliseAtualId(importacao?.analise?.id ?? null);
               setLoteNaoSalvo(false);
               await refreshDashboard();
+            }}
+            onExcluidas={ids => {
+              setAnalisesExcluidas(ids);
+              // O painel segue com os dados em memória, mas sem análise salva.
+              if (analiseAtualId && ids.includes(analiseAtualId)) {
+                setAnaliseAtualId(null);
+                setLoteNaoSalvo(true);
+              }
             }}
           />
         </div>

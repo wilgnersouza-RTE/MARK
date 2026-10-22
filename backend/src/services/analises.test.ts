@@ -6,6 +6,7 @@ import { sessionService } from './session';
 import {
   AVISO_MEMORIA,
   ErroAnaliseInexistente,
+  ErroExclusaoInterrompida,
   ErroZipDaAnalise,
   abrirNaSessao,
   armazenamentoAnalises,
@@ -13,6 +14,7 @@ import {
   calcularCompetencia,
   causaDaFalha,
   definirArmazenamentoAnalises,
+  excluirAnalises,
   reprocessar,
   salvarAposUpload,
 } from './analises';
@@ -20,6 +22,7 @@ import {
   ArmazenamentoAnalises,
   ArmazenamentoAnalisesMemoria,
   ArmazenamentoAnalisesSupabase,
+  ErroExclusaoParcial,
   ErroSupabase,
   ErroVersaoOcupada,
   RESTRICAO_VERSAO,
@@ -609,5 +612,313 @@ describe('ArmazenamentoAnalisesSupabase', () => {
     expect(registro!.documentos).toHaveLength(1000);
     expect(paginas).toBe(2);
     expect(await loja.obter('../../etc')).toBeNull();
+  });
+
+  const RPC_EXCLUIR = `${URL_PROJETO}/rest/v1/rpc/excluir_analise`;
+  const ZIP_URL = `${URL_PROJETO}/storage/v1/object/lotes/${EMPRESA}/2026-03/${analise.id}.zip`;
+  const semFuncao = { status: 404, corpo: { code: 'PGRST202', message: 'Could not find the function public.excluir_analise' } };
+  const metodo = (c: { init: any }) => c.init?.method ?? 'GET';
+
+  it('excluir: a função SQL apaga notas e análise numa transação; depois sai o ZIP', async () => {
+    responder(url => (url === RPC_EXCLUIR ? { corpo: [linha()] } : { status: 200, corpo: {} }));
+    const loja = new ArmazenamentoAnalisesSupabase(URL_PROJETO, 'k');
+
+    const removida = await loja.excluir(analise.id);
+
+    expect(chamadas.map(c => `${metodo(c)} ${c.url}`)).toEqual([`POST ${RPC_EXCLUIR}`, `DELETE ${ZIP_URL}`]);
+    expect(JSON.parse(chamadas[0].init.body)).toEqual({ p_id: analise.id });
+    expect(removida).toEqual({ analise: expect.objectContaining({ id: analise.id, zipBytes: 3 }), zipRemovido: true });
+  });
+
+  it('excluir: análise ausente na função ou id que não é uuid devolve null e não apaga o ZIP', async () => {
+    responder(() => ({ corpo: [] }));
+    const loja = new ArmazenamentoAnalisesSupabase(URL_PROJETO, 'k');
+
+    expect(await loja.excluir(analise.id)).toBeNull();
+    expect(await loja.excluir('../../etc')).toBeNull();
+    expect(chamadas.map(c => `${metodo(c)} ${c.url}`)).toEqual([`POST ${RPC_EXCLUIR}`]);
+  });
+
+  it('excluir sem a função (schema antigo): esconde, apaga as notas, a análise e o ZIP', async () => {
+    responder((url, init) => {
+      if (url === RPC_EXCLUIR) return semFuncao;
+      if (!init?.method) return { corpo: [linha()] };
+      return padrao(url, init);
+    });
+    const loja = new ArmazenamentoAnalisesSupabase(URL_PROJETO, 'k');
+
+    const removida = await loja.excluir(analise.id);
+
+    expect(chamadas.map(c => `${metodo(c)} ${c.url}`)).toEqual([
+      `POST ${RPC_EXCLUIR}`,
+      `GET ${URL_PROJETO}/rest/v1/analises?id=eq.${analise.id}&select=*`,
+      `PATCH ${URL_PROJETO}/rest/v1/analises?id=eq.${analise.id}`,
+      `DELETE ${URL_PROJETO}/rest/v1/analise_notas?analise_id=eq.${analise.id}`,
+      `DELETE ${URL_PROJETO}/rest/v1/analises?id=eq.${analise.id}`,
+      `DELETE ${ZIP_URL}`,
+    ]);
+    expect(JSON.parse(chamadas[2].init.body)).toEqual({ completa: false });
+    expect(removida).toEqual(expect.objectContaining({ zipRemovido: true }));
+  });
+
+  it('excluir sem a função: a linha some entre a leitura e o PATCH devolve null sem DELETE', async () => {
+    responder((url, init) => {
+      if (url === RPC_EXCLUIR) return semFuncao;
+      if (!init?.method) return { corpo: [linha()] };
+      if (init.method === 'PATCH') return { corpo: [] };
+      return { status: 200 };
+    });
+    expect(await new ArmazenamentoAnalisesSupabase(URL_PROJETO, 'k').excluir(analise.id)).toBeNull();
+    expect(chamadas.filter(c => metodo(c) === 'DELETE')).toHaveLength(0);
+  });
+
+  it('excluir sem a função: falha nas notas devolve a análise completa à lista e lança', async () => {
+    responder((url, init) => {
+      if (url === RPC_EXCLUIR) return semFuncao;
+      if (!init?.method) return { corpo: [linha()] };
+      if (init.method === 'DELETE') return { status: 503, corpo: 'pausado' };
+      return padrao(url, init);
+    });
+
+    await expect(new ArmazenamentoAnalisesSupabase(URL_PROJETO, 'k').excluir(analise.id)).rejects.toMatchObject({
+      name: 'ErroSupabase',
+      status: 503,
+    });
+    const patches = chamadas.filter(c => metodo(c) === 'PATCH').map(c => JSON.parse(c.init.body));
+    expect(patches).toEqual([{ completa: false }, { completa: true }]);
+    expect(chamadas.filter(c => metodo(c) === 'DELETE')).toHaveLength(1);
+  });
+
+  it('excluir sem a função: análise já incompleta não volta a completa se as notas falharem', async () => {
+    responder((url, init) => {
+      if (url === RPC_EXCLUIR) return semFuncao;
+      if (!init?.method) return { corpo: [linha({ completa: false })] };
+      if (init.method === 'DELETE') return { status: 503, corpo: 'pausado' };
+      return padrao(url, init);
+    });
+
+    await expect(new ArmazenamentoAnalisesSupabase(URL_PROJETO, 'k').excluir(analise.id)).rejects.toBeInstanceOf(
+      ErroSupabase
+    );
+    const patches = chamadas.filter(c => metodo(c) === 'PATCH').map(c => JSON.parse(c.init.body));
+    expect(patches).toEqual([{ completa: false }]);
+  });
+
+  it('excluir sem a função: falha ao apagar a linha avisa que a exclusão ficou pela metade', async () => {
+    responder((url, init) => {
+      if (url === RPC_EXCLUIR) return semFuncao;
+      if (!init?.method) return { corpo: [linha()] };
+      if (init.method === 'DELETE' && url.includes('/rest/v1/analises?')) return { status: 500, corpo: 'erro' };
+      return padrao(url, init);
+    });
+
+    const erro = await new ArmazenamentoAnalisesSupabase(URL_PROJETO, 'k').excluir(analise.id).catch(e => e);
+    expect(erro).toBeInstanceOf(ErroExclusaoParcial);
+    expect(erro.message).toMatch(/excluída pela metade/);
+    expect(erro.status).toBe(500);
+    expect(chamadas.some(c => c.url.includes('/storage/'))).toBe(false);
+  });
+
+  it('reservarVersao usa a função reservar_versao, que guarda a maior já usada', async () => {
+    responder(() => ({ corpo: 4 }));
+    const loja = new ArmazenamentoAnalisesSupabase(URL_PROJETO, 'k');
+
+    expect(await loja.reservarVersao(EMPRESA, '2026-03')).toBe(4);
+    expect(chamadas.map(c => `${metodo(c)} ${c.url}`)).toEqual([`POST ${URL_PROJETO}/rest/v1/rpc/reservar_versao`]);
+    expect(JSON.parse(chamadas[0].init.body)).toEqual({ p_empresa: EMPRESA, p_competencia: '2026-03' });
+  });
+
+  it('reservarVersao sem a função (schema antigo) usa a maior versão gravada + 1', async () => {
+    responder(url =>
+      url.includes('rpc/reservar_versao')
+        ? { status: 404, corpo: { code: 'PGRST202', message: 'Could not find the function public.reservar_versao' } }
+        : { corpo: [{ versao: 2 }] }
+    );
+    const loja = new ArmazenamentoAnalisesSupabase(URL_PROJETO, 'k');
+
+    expect(await loja.reservarVersao(EMPRESA, '2026-03')).toBe(3);
+    expect(chamadas[1].url).toContain('/rest/v1/analises?select=versao&completa=is.true');
+  });
+
+  it('reservarVersao propaga falhas que não são função ausente', async () => {
+    responder(() => ({ status: 503, corpo: 'pausado' }));
+    await expect(new ArmazenamentoAnalisesSupabase(URL_PROJETO, 'k').reservarVersao(EMPRESA, '2026-03')).rejects.toMatchObject({
+      name: 'ErroSupabase',
+      status: 503,
+    });
+    expect(chamadas).toHaveLength(1);
+  });
+
+  it('excluir: ZIP ausente ou que falha ao apagar vira aviso, e a análise sai', async () => {
+    const loja = new ArmazenamentoAnalisesSupabase(URL_PROJETO, 'k');
+
+    responder(url => (url === RPC_EXCLUIR ? { corpo: [linha()] } : { status: 400, corpo: { error: 'not_found' } }));
+    expect(await loja.excluir(analise.id)).toEqual(
+      expect.objectContaining({ zipRemovido: false, avisoZip: expect.stringMatching(/já não existia/) })
+    );
+
+    responder(url => (url === RPC_EXCLUIR ? { corpo: [linha()] } : { status: 500, corpo: 'erro' }));
+    expect(await loja.excluir(analise.id)).toEqual(
+      expect.objectContaining({ zipRemovido: false, avisoZip: expect.stringMatching(/não foi apagado.*HTTP 500/) })
+    );
+  });
+});
+
+describe('excluirAnalises', () => {
+  async function salvarNota(dia: string, zip = 'zip') {
+    const sessao = await sessaoCom([nota(dia)], EMPRESA);
+    const salva = await salvarAposUpload(sessao, { zip: Buffer.from(zip), criadoPor: 'x', lote: LOTE_VAZIO });
+    return { sessao, analise: salva.analise! };
+  }
+
+  it('exclui análise, notas e ZIP e informa o espaço liberado', async () => {
+    const { analise } = await salvarNota('2026-03-01', 'abcde');
+    const resultado = await excluirAnalises([analise.id], 'contador@exemplo.com');
+
+    expect(resultado).toEqual(
+      expect.objectContaining({ excluidas: [analise.id], naoEncontradas: [], bytesLiberados: 5, avisos: [] })
+    );
+    expect(await armazenamentoAnalises().obter(analise.id)).toBeNull();
+    expect((await armazenamentoAnalises().uso()).bytesZips).toBe(0);
+  });
+
+  it('lote parcial: exclui os existentes e devolve os não encontrados; repetidos contam uma vez', async () => {
+    const a = (await salvarNota('2026-03-01')).analise;
+    const b = (await salvarNota('2026-03-02')).analise;
+    const inexistente = '00000000-0000-4000-8000-000000000000';
+
+    const resultado = await excluirAnalises([a.id, inexistente, b.id, a.id], 'x');
+    expect(resultado.excluidas).toEqual([a.id, b.id]);
+    expect(resultado.naoEncontradas).toEqual([inexistente]);
+    expect((await armazenamentoAnalises().listar()).analises).toHaveLength(0);
+  });
+
+  it('não renumera as versões restantes; a próxima importação segue a maior', async () => {
+    const v1 = (await salvarNota('2026-03-01')).analise;
+    const v2 = (await salvarNota('2026-03-02')).analise;
+    const v3 = (await salvarNota('2026-03-03')).analise;
+    expect([v1.versao, v2.versao, v3.versao]).toEqual([1, 2, 3]);
+
+    await excluirAnalises([v2.id], 'x');
+
+    const restantes = (await armazenamentoAnalises().listar()).analises;
+    expect(restantes.map(a => [a.id, a.versao])).toEqual([
+      [v3.id, 3],
+      [v1.id, 1],
+    ]);
+    expect((await salvarNota('2026-03-04')).analise.versao).toBe(4);
+  });
+
+  it('excluir a versão mais alta não libera o número: a próxima importação vira a seguinte', async () => {
+    await salvarNota('2026-03-01');
+    await salvarNota('2026-03-02');
+    const v3 = (await salvarNota('2026-03-03')).analise;
+    expect(v3.versao).toBe(3);
+
+    await excluirAnalises([v3.id], 'x');
+    expect(await armazenamentoAnalises().maiorVersao(EMPRESA, '2026-03')).toBe(2);
+    expect((await salvarNota('2026-03-04')).analise.versao).toBe(4);
+  });
+
+  it('versão reservada por gravação que falhou é pulada, não reusada', async () => {
+    const loja = new ArmazenamentoAnalisesMemoria();
+    definirArmazenamentoAnalises(loja);
+    expect((await salvarNota('2026-03-01')).analise.versao).toBe(1);
+
+    const salvarOriginal = loja.salvar.bind(loja);
+    loja.salvar = async () => {
+      throw new ErroSupabase('Sem resposta da Supabase (fetch failed).');
+    };
+    const sessao = await sessaoCom([nota('2026-03-02')], EMPRESA);
+    expect((await salvarAposUpload(sessao, { zip: Buffer.from('z'), criadoPor: 'x', lote: LOTE_VAZIO })).analiseSalva).toBe(false);
+    loja.salvar = salvarOriginal;
+
+    expect((await salvarNota('2026-03-03')).analise.versao).toBe(3);
+  });
+
+  it('desfaz o vínculo das sessões ligadas, que seguem com as notas em memória', async () => {
+    const { sessao, analise } = await salvarNota('2026-03-01');
+    sessionService.criarOuRecuperarSessao('sess-excluir-aberta', 'outro', 'outro@exemplo.com');
+    await abrirNaSessao(analise.id, 'sess-excluir-aberta');
+
+    const resultado = await excluirAnalises([analise.id], 'x');
+
+    expect(resultado.sessoesDesvinculadas).toBe(2);
+    for (const id of [sessao.sessionId, 'sess-excluir-aberta']) {
+      const depois = sessionService.obterSessao(id)!;
+      expect(depois.analiseId).toBeUndefined();
+      expect(depois.analiseOrigem).toBeUndefined();
+      expect(depois.documentos).toHaveLength(1);
+    }
+  });
+
+  it('ZIP ausente: exclui a análise e devolve o aviso', async () => {
+    const loja = new ArmazenamentoAnalisesMemoria();
+    definirArmazenamentoAnalises(loja);
+    const { analise } = await salvarNota('2026-03-01');
+    const salva = (await loja.obter(analise.id))!.analise;
+    (loja as any).zips.delete(salva.zipPath);
+
+    const resultado = await excluirAnalises([analise.id], 'x');
+    expect(resultado.excluidas).toEqual([analise.id]);
+    expect(resultado.bytesLiberados).toBe(0);
+    expect(resultado.avisos).toEqual([expect.stringMatching(/já não existia/)]);
+  });
+
+  it('falha do armazenamento no meio do lote informa o que já saiu', async () => {
+    const loja = new ArmazenamentoAnalisesMemoria();
+    definirArmazenamentoAnalises(loja);
+    const a = (await salvarNota('2026-03-01')).analise;
+    const b = (await salvarNota('2026-03-02')).analise;
+    const excluirOriginal = loja.excluir.bind(loja);
+    loja.excluir = async id => {
+      if (id === b.id) throw new ErroSupabase('Sem resposta da Supabase (fetch failed).');
+      return excluirOriginal(id);
+    };
+
+    const erro = await excluirAnalises([a.id, b.id], 'x').catch(e => e);
+    expect(erro).toBeInstanceOf(ErroExclusaoInterrompida);
+    expect(erro.parcial.excluidas).toEqual([a.id]);
+    expect(await loja.obter(b.id)).not.toBeNull();
+  });
+
+  it('registra no log quem excluiu e, se houver, o administrador que assumiu a conta', async () => {
+    const a = (await salvarNota('2026-03-01')).analise;
+    const b = (await salvarNota('2026-03-02')).analise;
+    const log = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await excluirAnalises([a.id], 'contador@exemplo.com');
+      await excluirAnalises([b.id], 'cliente@exemplo.com', { userId: 'adm', email: 'admin@exemplo.com' });
+      const linhas = log.mock.calls.map(c => String(c[0])).filter(l => l.includes('excluiu a análise'));
+      expect(linhas[0]).toContain(
+        `contador@exemplo.com excluiu a análise ${a.id} (empresa ${EMPRESA}, competência 2026-03, versão 1)`
+      );
+      expect(linhas[1]).toMatch(/cliente@exemplo\.com \(assumido por admin@exemplo\.com\) excluiu/);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('id em maiúsculas casa com a análise e com a sessão, e conta uma vez', async () => {
+    const { sessao, analise } = await salvarNota('2026-03-01');
+    const resultado = await excluirAnalises([analise.id.toUpperCase(), analise.id], 'x');
+    expect(resultado.excluidas).toEqual([analise.id]);
+    expect(resultado.sessoesDesvinculadas).toBe(1);
+    expect(sessionService.obterSessao(sessao.sessionId)!.analiseId).toBeUndefined();
+  });
+
+  it('desfaz o vínculo da sessão antes de apagar no armazenamento', async () => {
+    const loja = new ArmazenamentoAnalisesMemoria();
+    definirArmazenamentoAnalises(loja);
+    const { sessao, analise } = await salvarNota('2026-03-01');
+    const excluirOriginal = loja.excluir.bind(loja);
+    let vinculoDurante: string | undefined = 'nao-lido';
+    loja.excluir = async id => {
+      vinculoDurante = sessionService.obterSessao(sessao.sessionId)!.analiseId;
+      return excluirOriginal(id);
+    };
+
+    await excluirAnalises([analise.id], 'x');
+    expect(vinculoDurante).toBeUndefined();
   });
 });

@@ -13,7 +13,8 @@ import { NFeDocument } from '../types';
  *     backend; o frontend nunca fala com a Supabase.
  *
  * A escolha é automática: com SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY,
- * Supabase; senão, memória. Nada aqui exclui análises nem ZIPs.
+ * Supabase; senão, memória. `excluir` é o único caminho que apaga análise,
+ * notas e ZIP, e só é chamado depois da confirmação na tela.
  *
  * Na Supabase, a gravação não é atômica (são várias requisições). Por isso
  * a análise nasce com `completa = false` e só passa a `true` depois que
@@ -119,6 +120,28 @@ export class ErroSupabase extends Error {
   }
 }
 
+/** As notas saíram, mas a linha da análise não: ela fica oculta e sem notas. */
+export class ErroExclusaoParcial extends ErroSupabase {
+  constructor(public analiseId: string, causa: any) {
+    super(
+      `A análise ${analiseId} foi excluída pela metade: as notas saíram, mas a análise não ` +
+        `(ficou oculta; exclua de novo). ${causa?.message ?? causa}`,
+      causa?.status
+    );
+    this.name = 'ErroExclusaoParcial';
+  }
+}
+
+/** O que a exclusão de uma análise removeu. */
+export interface ResultadoExclusaoArmazenada {
+  /** Dados da análise removida, para o log e o espaço liberado */
+  analise: AnaliseSalva;
+  /** true quando o ZIP foi apagado agora */
+  zipRemovido: boolean;
+  /** Por que o ZIP não foi apagado (ausente ou falha); a análise saiu mesmo assim */
+  avisoZip?: string;
+}
+
 export interface ArmazenamentoAnalises {
   readonly tipo: 'memoria' | 'supabase';
   salvar(analise: AnaliseSalva, documentos: NFeDocument[], zip: Buffer): Promise<void>;
@@ -127,10 +150,20 @@ export interface ArmazenamentoAnalises {
   listar(filtro?: { empresa?: string; offset?: number; limite?: number }): Promise<PaginaAnalises>;
   /** Maior versão já usada pela empresa na competência; 0 se nenhuma. */
   maiorVersao(empresa: string, competencia: string): Promise<number>;
+  /**
+   * Reserva a próxima versão da empresa na competência. Números de análises
+   * excluídas ou de gravações que falharam nunca voltam a ser usados.
+   */
+  reservarVersao(empresa: string, competencia: string): Promise<number>;
   listarEmpresas(): Promise<EmpresaComAnalises[]>;
   obter(id: string): Promise<{ analise: AnaliseSalva; documentos: NFeDocument[] } | null>;
   baixarZip(analise: AnaliseSalva): Promise<Buffer | null>;
   uso(): Promise<UsoArmazenamento>;
+  /**
+   * Apaga as notas, a análise e o ZIP. Devolve null se a análise não
+   * existe. Falha ao apagar o ZIP não impede a exclusão: vira `avisoZip`.
+   */
+  excluir(id: string): Promise<ResultadoExclusaoArmazenada | null>;
   descricao(): string;
 }
 
@@ -151,12 +184,38 @@ const ordenarRecentes = (a: AnaliseSalva, b: AnaliseSalva) =>
 /** Cópia profunda: o que sai do armazenamento não pode alterar o guardado. */
 const copia = <T>(valor: T): T => JSON.parse(JSON.stringify(valor));
 
+const avisoZipAusente = (caminho: string) =>
+  `O ZIP da análise (${caminho}) já não existia no armazenamento; a análise foi excluída mesmo assim.`;
+
+const avisoZipNaoRemovido = (caminho: string, motivo: string) =>
+  `A análise foi excluída, mas o ZIP (${caminho}) não foi apagado do armazenamento (${motivo}). ` +
+  'Apague-o no painel da Supabase (Storage, bucket lotes) para liberar o espaço.';
+
 // ==================== Memória ====================
 
 export class ArmazenamentoAnalisesMemoria implements ArmazenamentoAnalises {
   readonly tipo = 'memoria' as const;
   private analises = new Map<string, { analise: AnaliseSalva; documentos: NFeDocument[] }>();
   private zips = new Map<string, Buffer>();
+  /** Maior versão já usada por empresa + competência; sobrevive às exclusões. */
+  private ultimasVersoes = new Map<string, number>();
+
+  private registrarVersao(empresa: string, competencia: string, versao: number) {
+    const chave = `${empresa}|${competencia}`;
+    this.ultimasVersoes.set(chave, Math.max(this.ultimasVersoes.get(chave) ?? 0, versao));
+  }
+
+  async reservarVersao(empresa: string, competencia: string): Promise<number> {
+    const chave = `${empresa}|${competencia}`;
+    // Sem await até gravar: duas reservas simultâneas não pegam o mesmo número.
+    let maior = this.ultimasVersoes.get(chave) ?? 0;
+    for (const { analise: a } of this.analises.values()) {
+      if (a.empresaCnpj === empresa && a.competencia === competencia) maior = Math.max(maior, a.versao);
+    }
+    const proxima = maior + 1;
+    this.ultimasVersoes.set(chave, proxima);
+    return proxima;
+  }
 
   private ocupada(empresa: string, competencia: string, versao: number, ignorarId?: string) {
     return Array.from(this.analises.values()).some(
@@ -170,6 +229,7 @@ export class ArmazenamentoAnalisesMemoria implements ArmazenamentoAnalises {
 
     if (analise.zipPath) this.zips.set(analise.zipPath, Buffer.from(zip));
     this.analises.set(analise.id, { analise: copia(analise), documentos: copia(documentos) });
+    this.registrarVersao(analise.empresaCnpj, analise.competencia, analise.versao);
   }
 
   async atualizarEmpresa(id: string, alteracao: AlteracaoEmpresa, documentos: NFeDocument[]): Promise<AnaliseSalva> {
@@ -192,6 +252,7 @@ export class ArmazenamentoAnalisesMemoria implements ArmazenamentoAnalises {
     }
 
     registro.analise = copia({ ...registro.analise, ...alteracao, zipPath });
+    this.registrarVersao(alteracao.empresaCnpj, alteracao.competencia, alteracao.versao);
     registro.documentos = copia(documentos);
     return copia(registro.analise);
   }
@@ -249,6 +310,19 @@ export class ArmazenamentoAnalisesMemoria implements ArmazenamentoAnalises {
       limiteBytesZips: null,
       limiteBytesBanco: null,
     };
+  }
+
+  async excluir(id: string): Promise<ResultadoExclusaoArmazenada | null> {
+    const registro = this.analises.get(id);
+    if (!registro) return null;
+    this.analises.delete(id);
+
+    const analise = copia(registro.analise);
+    if (!analise.zipPath) return { analise, zipRemovido: false };
+    if (!this.zips.delete(analise.zipPath)) {
+      return { analise, zipRemovido: false, avisoZip: avisoZipAusente(analise.zipPath) };
+    }
+    return { analise, zipRemovido: true };
   }
 
   descricao(): string {
@@ -508,6 +582,30 @@ export class ArmazenamentoAnalisesSupabase implements ArmazenamentoAnalises {
     return linhas[0]?.versao ?? 0;
   }
 
+  /**
+   * Próxima versão pela função `reservar_versao`, que guarda a maior já
+   * usada. Sem a função (schema.sql não rodado de novo), maior versão + 1.
+   */
+  async reservarVersao(empresa: string, competencia: string): Promise<number> {
+    try {
+      const versao = await this.rest<number>('rpc/reservar_versao', 'reservar a próxima versão', {
+        method: 'POST',
+        body: JSON.stringify({ p_empresa: empresa, p_competencia: competencia }),
+      });
+      const numero = Number(versao);
+      if (!Number.isInteger(numero) || numero < 1) {
+        throw new ErroSupabase(`Supabase devolveu uma versão inválida (${JSON.stringify(versao)}).`, 500);
+      }
+      return numero;
+    } catch (erro) {
+      if (!(erro instanceof ErroSupabase && erro.status === 404)) throw erro;
+      console.warn(
+        'Função reservar_versao ausente na Supabase: usando a maior versão + 1. Rode de novo backend/supabase/schema.sql.'
+      );
+      return (await this.maiorVersao(empresa, competencia)) + 1;
+    }
+  }
+
   async listarEmpresas(): Promise<EmpresaComAnalises[]> {
     const linhas = await this.rest<Array<{ cnpj: string; nome: string | null; quantidade: number | string }>>(
       'rpc/empresas_com_analises',
@@ -563,6 +661,96 @@ export class ArmazenamentoAnalisesSupabase implements ArmazenamentoAnalises {
       bytesBanco: Number.isFinite(bytesBanco) ? bytesBanco : null,
       limiteBytesZips: LIMITE_GRATUITO_STORAGE,
       limiteBytesBanco: LIMITE_GRATUITO_BANCO,
+    };
+  }
+
+  /**
+   * Exclui notas e análise pela função `excluir_analise` (uma transação só)
+   * e depois apaga o ZIP. Bancos em que o schema.sql ainda não foi rodado de
+   * novo não têm a função: aí a exclusão segue em etapas.
+   */
+  async excluir(id: string): Promise<ResultadoExclusaoArmazenada | null> {
+    if (!UUID.test(id)) return null;
+
+    let linha: LinhaAnalise | null;
+    try {
+      const linhas = await this.rest<LinhaAnalise[]>('rpc/excluir_analise', 'excluir a análise', {
+        method: 'POST',
+        body: JSON.stringify({ p_id: id }),
+      });
+      linha = linhas?.[0] ?? null;
+    } catch (erro) {
+      if (!(erro instanceof ErroSupabase && erro.status === 404)) throw erro;
+      console.warn(
+        'Função excluir_analise ausente na Supabase: excluindo em etapas. Rode de novo backend/supabase/schema.sql.'
+      );
+      linha = await this.excluirEmEtapas(id);
+    }
+
+    if (!linha) return null;
+    return this.apagarZip(deLinha(linha));
+  }
+
+  /** Exclusão sem a função SQL: esconde, apaga as notas e depois a análise. */
+  private async excluirEmEtapas(id: string): Promise<LinhaAnalise | null> {
+    // Também as incompletas: uma exclusão interrompida pode ser repetida.
+    const linhas = await this.rest<LinhaAnalise[]>(`analises?id=eq.${id}&select=*`, 'ler a análise a excluir');
+    if (!linhas[0]) return null;
+
+    // 1. Some da lista antes de perder as notas.
+    try {
+      await this.patch(id, { completa: false }, 'excluir a análise');
+    } catch (erro) {
+      if (erro instanceof ErroSupabase && erro.status === 404) return null;
+      throw erro;
+    }
+
+    // 2. As notas (a chave estrangeira exige que saiam antes da análise).
+    try {
+      await this.rest(`analise_notas?analise_id=eq.${id}`, 'excluir as notas da análise', {
+        method: 'DELETE',
+        headers: { Prefer: 'return=minimal' },
+      });
+    } catch (erro) {
+      // Nada foi apagado: volta como estava (oculta, se já era incompleta).
+      if (linhas[0].completa !== false) {
+        await this.patch(id, { completa: true }, 'restaurar a análise').catch(() => undefined);
+      }
+      throw erro;
+    }
+
+    // 3. A análise. Se falhar, ela fica oculta e sem notas.
+    try {
+      await this.rest(`analises?id=eq.${id}`, 'excluir a análise', {
+        method: 'DELETE',
+        headers: { Prefer: 'return=minimal' },
+      });
+    } catch (erro: any) {
+      throw new ErroExclusaoParcial(id, erro);
+    }
+    return linhas[0];
+  }
+
+  /** Apaga o ZIP. Falhar aqui não desfaz a exclusão; vira aviso. */
+  private async apagarZip(analise: AnaliseSalva): Promise<ResultadoExclusaoArmazenada> {
+    if (!analise.zipPath) return { analise, zipRemovido: false };
+    let resposta: Response;
+    try {
+      resposta = await this.requisitar(this.caminhoObjeto(analise.zipPath), { method: 'DELETE' });
+    } catch (erro: any) {
+      return { analise, zipRemovido: false, avisoZip: avisoZipNaoRemovido(analise.zipPath, erro?.message ?? String(erro)) };
+    }
+    if (resposta.ok) return { analise, zipRemovido: true };
+
+    const texto = await resposta.text().catch(() => '');
+    // O Storage responde 400 com "not_found" para objeto inexistente.
+    if (resposta.status === 404 || /not.?found/i.test(texto)) {
+      return { analise, zipRemovido: false, avisoZip: avisoZipAusente(analise.zipPath) };
+    }
+    return {
+      analise,
+      zipRemovido: false,
+      avisoZip: avisoZipNaoRemovido(analise.zipPath, `HTTP ${resposta.status}: ${texto.slice(0, 200)}`),
     };
   }
 
