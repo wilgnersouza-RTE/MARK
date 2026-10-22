@@ -757,6 +757,120 @@ const UploadSection: React.FC<{
   );
 };
 
+interface LinhaImportacao {
+  id: string;
+  competencia: string;
+  versao: number;
+  criadoEm: string;
+  criadoPor: string;
+  nomeArquivo: string | null;
+  notas: number;
+  valorTotal: number;
+  tributos: number;
+}
+
+interface TabelaImportacoes {
+  empresa: { cnpj: string; nome: string | null };
+  importacoes: LinhaImportacao[];
+  total: { notas: number; valorTotal: number; tributos: number };
+  aviso?: string;
+}
+
+/**
+ * Importações do cliente: cada análise salva que entrou no conjunto da
+ * empresa (a versão mais recente de cada competência), com notas, valor e
+ * tributos do recorte, e o total geral. Só aparece com uma empresa escolhida.
+ */
+const ImportacoesCliente: React.FC<{
+  sessionId: string;
+  token: string;
+  filtros: Record<string, string>;
+}> = ({ sessionId, token, filtros }) => {
+  const [tabela, setTabela] = useState<TabelaImportacoes | null>(null);
+  const [erro, setErro] = useState<string | null>(null);
+
+  useEffect(() => {
+    let ativo = true;
+    setErro(null);
+    // Tabela de outro recorte não fica na tela: mostra "Carregando…".
+    setTabela(null);
+    axios
+      .get(`${API_URL}/api/v1/dashboard/importacoes`, {
+        headers: { 'x-session-id': sessionId, Authorization: `Bearer ${token}` },
+        params: filtros,
+      })
+      .then(r => {
+        if (ativo) setTabela(r.data.data);
+      })
+      .catch(e => {
+        if (!ativo) return;
+        setTabela(null);
+        setErro(e?.response?.data?.error || 'Não foi possível carregar as importações do cliente.');
+      });
+    return () => {
+      ativo = false;
+    };
+  }, [sessionId, token, filtros]);
+
+  const celula = 'px-3 py-2 text-right tabular-nums';
+
+  return (
+    <Card>
+      <h3 className="font-semibold text-lg">Importações do cliente</h3>
+      <p className="mb-4 text-sm text-tinta-suave">
+        Versão mais recente de cada competência
+        {tabela?.empresa.nome ? ` · ${tabela.empresa.nome}` : ''} · valores dentro dos filtros escolhidos
+      </p>
+
+      {erro && <p className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700">{erro}</p>}
+      {!erro && !tabela && <p className="text-sm text-tinta-suave">Carregando…</p>}
+      {tabela && tabela.importacoes.length === 0 && (
+        <p className="text-sm text-tinta-suave">{tabela.aviso || 'Nenhuma importação incluída.'}</p>
+      )}
+      {tabela && tabela.importacoes.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-fundo-borda text-[11px] uppercase tracking-wider text-tinta-suave">
+                <th className="px-3 py-2 text-left">Competência</th>
+                <th className="px-3 py-2 text-left">Versão</th>
+                <th className="px-3 py-2 text-left">Importada em</th>
+                <th className="px-3 py-2 text-right">Notas</th>
+                <th className="px-3 py-2 text-right">Valor total</th>
+                <th className="px-3 py-2 text-right">Tributos</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tabela.importacoes.map(l => (
+                <tr key={l.id} className="border-b border-fundo-borda/60">
+                  <td className="px-3 py-2">{rotuloCompetencia(l.competencia)}</td>
+                  <td className="px-3 py-2">v{l.versao}</td>
+                  <td className="px-3 py-2" title={l.nomeArquivo ?? undefined}>
+                    {new Date(l.criadoEm).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
+                  </td>
+                  <td className={celula}>{formatarInteiro(l.notas)}</td>
+                  <td className={celula}>{formatarMoeda(l.valorTotal)}</td>
+                  <td className={celula}>{formatarMoeda(l.tributos)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="font-semibold text-tinta-forte">
+                <td className="px-3 py-2" colSpan={3}>
+                  Total geral
+                </td>
+                <td className={celula}>{formatarInteiro(tabela.total.notas)}</td>
+                <td className={celula}>{formatarMoeda(tabela.total.valorTotal)}</td>
+                <td className={celula}>{formatarMoeda(tabela.total.tributos)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+};
+
 // Dashboard Content
 /**
  * Painel do lote, com a barra de filtros comum a todas as abas.
@@ -782,7 +896,18 @@ const DashboardContent: React.FC<{
   const [exportando, setExportando] = useState(false);
   // "Atualizar dashboard" incrementa: refaz /filtros mantendo a seleção.
   const [recarga, setRecarga] = useState(0);
-  const ultimaVersao = useRef<number | null>(null);
+  // Origem das notas: '' = lote da sessão; CNPJ = análises salvas da empresa.
+  const [empresa, setEmpresa] = useState('');
+  const ultimaEmpresa = useRef('');
+  // true quando o conjunto da empresa não pôde ser carregado: o cartão fica
+  // à mão para voltar ao lote atual, e as demais buscas não são feitas.
+  const [indisponivel, setIndisponivel] = useState(false);
+  // Empresas da última resposta boa, para a lista não sumir numa falha.
+  const empresasConhecidas = useRef<OpcoesFiltros['empresas']>([]);
+
+  // Lote, sessão ou usuário novos: a origem volta ao lote atual e os filtros ao padrão.
+  const ultimaChave = useRef<string | null>(null);
+  const resetPendente = useRef(false);
 
   const cabecalhos = { 'x-session-id': sessionId, Authorization: `Bearer ${token}` };
 
@@ -790,41 +915,93 @@ const DashboardContent: React.FC<{
   const parametros = useMemo(() => (filtros ? paraParametros(filtros) : null), [filtros]);
 
   // Uma busca só alimenta os cartões Entradas e Saídas e a lista de notas.
-  const conferencia = useConferenciaReforma(sessionId, token, parametros);
+  // Só valem os parâmetros da origem atual: durante a troca de empresa (ou de
+  // lote) os filtros ainda são da anterior e não devem gerar busca.
+  const parametrosAtuais =
+    parametros && !indisponivel && (parametros.empresa ?? '') === empresa ? parametros : null;
+  const conferencia = useConferenciaReforma(sessionId, token, parametrosAtuais);
 
   // Busca as opções. Lote novo abre os filtros no padrão que o servidor
   // indica; numa recarga a seleção atual é mantida (objeto novo, para todas
   // as buscas serem refeitas).
   useEffect(() => {
+    // Lote, sessão ou usuário novos: volta ao lote atual antes de buscar,
+    // para não fazer uma carga da empresa anterior.
+    const chave = `${versaoLote}|${sessionId}|${token}`;
+    if (ultimaChave.current !== chave) {
+      ultimaChave.current = chave;
+      resetPendente.current = true;
+      if (empresa) {
+        setEmpresa('');
+        return;
+      }
+    }
+
     let ativo = true;
     setErro(null);
+    // Lote novo ou outra empresa: os filtros voltam ao padrão do conjunto.
+    const origemNova = resetPendente.current || ultimaEmpresa.current !== empresa;
     axios
-      .get(`${API_URL}/api/v1/dashboard/filtros`, { headers: cabecalhos })
+      .get(`${API_URL}/api/v1/dashboard/filtros`, {
+        headers: cabecalhos,
+        params: empresa ? { empresa } : {},
+      })
       .then(r => {
         if (!ativo) return;
         const dados: OpcoesFiltros = r.data.data;
-        const padrao: EstadoFiltros = { sentido: dados.sentidoPadrao, cfop: '', ncm: '' };
-        const loteNovo = ultimaVersao.current !== versaoLote;
-        ultimaVersao.current = versaoLote;
+        const padrao: EstadoFiltros = { empresa, sentido: dados.sentidoPadrao, cfop: '', ncm: '' };
+        resetPendente.current = false;
+        ultimaEmpresa.current = empresa;
+        if (!dados.avisoEmpresas) empresasConhecidas.current = dados.empresas ?? [];
+        setIndisponivel(false);
         setOpcoes(dados);
-        setFiltros(f => (loteNovo || !f ? padrao : { ...f }));
+        setFiltros(f => (origemNova || !f ? padrao : { ...f }));
       })
-      .catch(() => {
+      .catch(e => {
         if (!ativo) return;
+        setResumo(null);
+        if (empresa) {
+          // Empresa fora do ar: o cartão continua, para voltar ao lote atual.
+          resetPendente.current = false;
+          ultimaEmpresa.current = empresa;
+          setIndisponivel(true);
+          setOpcoes({
+            cfops: [],
+            ncms: [],
+            temEmpresa: true,
+            sentidoPadrao: 'todas',
+            totalDocumentos: 0,
+            empresa,
+            empresas: empresasConhecidas.current,
+          });
+          setFiltros({ empresa, sentido: 'todas', cfop: '', ncm: '' });
+          setErro(e?.response?.data?.error || 'Não foi possível carregar as análises da empresa.');
+          return;
+        }
         // Opções velhas não podem seguir valendo para um lote que não se conhece.
         setOpcoes(null);
         setFiltros(null);
-        setResumo(null);
         setErro('Não foi possível carregar os filtros da análise.');
       });
     return () => {
       ativo = false;
     };
-  }, [versaoLote, recarga, sessionId, token]);
+  }, [versaoLote, recarga, sessionId, token, empresa]);
+
+  // A lista EMPRESA troca a origem (refaz /filtros); os demais só o recorte.
+  const aoMudarFiltros = (novos: EstadoFiltros) => {
+    if (novos.empresa !== empresa) {
+      setEmpresa(novos.empresa);
+      return;
+    }
+    setFiltros(novos);
+  };
 
   // Indicadores do topo e aba Regimes, sempre com o recorte escolhido.
   useEffect(() => {
-    if (!parametros) return;
+    // Filtros ainda da origem anterior (a troca de empresa está em curso) ou
+    // conjunto indisponível: nada a buscar.
+    if (!parametros || indisponivel || (parametros.empresa ?? '') !== empresa) return;
     let ativo = true;
     setIsLoading(true);
     setErro(null);
@@ -848,7 +1025,7 @@ const DashboardContent: React.FC<{
     return () => {
       ativo = false;
     };
-  }, [parametros, sessionId, token]);
+  }, [parametros, sessionId, token, indisponivel, empresa]);
 
   // Refaz /filtros e, com ele, todas as buscas, sem perder a seleção.
   const onRefresh = () => {
@@ -915,26 +1092,50 @@ const DashboardContent: React.FC<{
     ) : null;
   }
 
-  if (opcoes.totalDocumentos === 0) {
-    return (
-      <div className="text-center py-12">
-        <FileText size={48} className="mx-auto text-tinta-suave mb-4" />
-        <p className="text-tinta-suave">Nenhum dado disponível. Faça upload de NF-e para começar.</p>
-      </div>
-    );
-  }
-
   const cartaoFiltros = (
     <FiltrosAnalise
       filtros={filtros}
       opcoes={opcoes}
-      onChange={setFiltros}
+      onChange={aoMudarFiltros}
       onExportar={handleExportExcel}
       exportando={exportando}
       retraido={retraido}
       onAlternarRetraido={() => setRetraido(v => !v)}
     />
   );
+
+  if (opcoes.totalDocumentos === 0) {
+    // Sem empresa escolhida e sem empresas salvas, a tela de sempre. Com
+    // empresas, o cartão fica, para o contador poder escolher uma.
+    if (!empresa && (opcoes.empresas ?? []).length === 0 && !opcoes.avisoEmpresas) {
+      return (
+        <div className="text-center py-12">
+          <FileText size={48} className="mx-auto text-tinta-suave mb-4" />
+          <p className="text-tinta-suave">Nenhum dado disponível. Faça upload de NF-e para começar.</p>
+        </div>
+      );
+    }
+    const mensagem = indisponivel
+      ? null
+      : empresa
+        ? opcoes.aviso || 'Nenhuma análise salva desta empresa'
+        : opcoes.avisoEmpresas
+          ? `Nenhuma nota no lote atual. Faça upload de NF-e. ${opcoes.avisoEmpresas}`
+          : 'Nenhuma nota no lote atual. Faça upload de NF-e ou escolha uma empresa com análises salvas.';
+    return (
+      <div className="space-y-6">
+        {cartaoFiltros}
+        {bannerErro}
+        {mensagem && (
+          <div className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800">
+            <AlertTriangle size={16} className="shrink-0" />
+            {mensagem}
+          </div>
+        )}
+        {indisponivel && botaoAtualizar}
+      </div>
+    );
+  }
 
   // Lote com notas, mas indicadores ainda não carregados (ou com falha):
   // o cartão e o botão de atualizar continuam à mão.
@@ -1071,12 +1272,16 @@ const DashboardContent: React.FC<{
 
       {/* Tab Content */}
       <div>
-        {activeTab === 'painel' && parametros && (
+        {activeTab === 'painel' && parametrosAtuais && (
           <div className="space-y-6">
+            {parametrosAtuais.empresa && (
+              <ImportacoesCliente sessionId={sessionId} token={token} filtros={parametrosAtuais} />
+            )}
+
             {/* CAP-5: o resumo do lote parte do percentual de notas completas. */}
             <CartoesReforma conferencia={conferencia} />
 
-            <PainelExecutivo sessionId={sessionId} token={token} filtros={parametros} />
+            <PainelExecutivo sessionId={sessionId} token={token} filtros={parametrosAtuais} />
 
             {/* Resumo: o conteúdo da antiga aba Detalhado. */}
             <Card>

@@ -18,6 +18,23 @@ export class SessionService {
   private sessions: Map<string, UserSession> = new Map();
   private readonly SESSION_TIMEOUT = 24 * 60 * 60 * 1000; // 24 horas
   private contadorLotes = 0;
+  /** Avisados quando uma sessão é limpa, excluída ou expira (caches por sessão). */
+  private ouvintesEncerramento: Array<(sessionId: string) => void> = [];
+
+  /** Registra quem precisa descartar dados da sessão quando ela acaba. */
+  aoEncerrarSessao(ouvinte: (sessionId: string) => void): void {
+    this.ouvintesEncerramento.push(ouvinte);
+  }
+
+  private avisarEncerramento(sessionId: string): void {
+    for (const ouvinte of this.ouvintesEncerramento) {
+      try {
+        ouvinte(sessionId);
+      } catch (erro) {
+        console.error('Erro ao descartar dados da sessão encerrada:', erro);
+      }
+    }
+  }
 
   /**
    * Cria ou recupera uma sessão
@@ -198,6 +215,7 @@ export class SessionService {
     sessao.dashboard = null;
     sessao.importacoes = [];
     sessao.ultimaAtualizacao = new Date().toISOString();
+    this.avisarEncerramento(sessionId);
 
     return sessao;
   }
@@ -232,7 +250,9 @@ export class SessionService {
    * Deleta uma sessão completamente
    */
   deletarSessao(sessionId: string): boolean {
-    return this.sessions.delete(sessionId);
+    const removida = this.sessions.delete(sessionId);
+    if (removida) this.avisarEncerramento(sessionId);
+    return removida;
   }
 
   /**
@@ -247,6 +267,7 @@ export class SessionService {
 
       if (idade > this.SESSION_TIMEOUT) {
         this.sessions.delete(sessionId);
+        this.avisarEncerramento(sessionId);
         deletadas++;
       }
     }

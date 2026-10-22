@@ -38,6 +38,17 @@ export function armazenamentoAnalises(): ArmazenamentoAnalises {
 /** Troca o armazenamento (testes). */
 export function definirArmazenamentoAnalises(novo: ArmazenamentoAnalises): void {
   armazenamento = novo;
+  geracao++;
+}
+
+/**
+ * Sobe a cada gravação, alteração ou exclusão feita por este servidor:
+ * quem guarda listagens (conjuntoEmpresa.ts) sabe que precisa reler.
+ */
+let geracao = 0;
+
+export function geracaoAnalises(): number {
+  return geracao;
 }
 
 /** Quantos arquivos recusados guardar no resumo da análise. */
@@ -315,6 +326,7 @@ async function gravarNovaAnalise(dados: DadosNovaAnalise): Promise<AnaliseSalva>
 
     try {
       await armazenamentoAnalises().salvar(analise, dados.documentos, dados.zip);
+      geracao++;
       return analise;
     } catch (erro) {
       if (!(erro instanceof ErroVersaoOcupada) || tentativa >= TENTATIVAS_VERSAO) throw erro;
@@ -448,6 +460,7 @@ export async function atualizarAposTrocaEmpresa(sessao: UserSession, criadoPor?:
           },
           documentos
         );
+        geracao++;
         return salva(atualizada);
       } catch (erro) {
         if (!(erro instanceof ErroVersaoOcupada) || tentativa >= TENTATIVAS_VERSAO) throw erro;
@@ -623,7 +636,9 @@ export async function excluirAnalises(
     let removida;
     try {
       removida = await loja.excluir(id);
+      geracao++;
     } catch (erro: any) {
+      geracao++;
       console.error(
         `[análises] Exclusão pedida por ${quem} interrompida em ${id} ` +
           `(${resultado.excluidas.length} já excluída(s)): ${erro?.message ?? erro}`

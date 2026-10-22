@@ -178,8 +178,9 @@ function limitesDaPagina(filtro: { offset?: number; limite?: number }) {
   return { offset, limite };
 }
 
+// O id desempata: a ordem fica estável entre páginas.
 const ordenarRecentes = (a: AnaliseSalva, b: AnaliseSalva) =>
-  b.criadoEm.localeCompare(a.criadoEm) || b.versao - a.versao;
+  b.criadoEm.localeCompare(a.criadoEm) || b.versao - a.versao || b.id.localeCompare(a.id);
 
 /** Cópia profunda: o que sai do armazenamento não pode alterar o guardado. */
 const copia = <T>(valor: T): T => JSON.parse(JSON.stringify(valor));
@@ -567,7 +568,7 @@ export class ArmazenamentoAnalisesSupabase implements ArmazenamentoAnalises {
   async listar(filtro: { empresa?: string; offset?: number; limite?: number } = {}): Promise<PaginaAnalises> {
     const { offset, limite } = limitesDaPagina(filtro);
     // Uma a mais que o pedido, para saber se há próxima página.
-    const partes = ['select=*', 'completa=is.true', 'order=criado_em.desc,versao.desc', `limit=${limite + 1}`, `offset=${offset}`];
+    const partes = ['select=*', 'completa=is.true', 'order=criado_em.desc,versao.desc,id.desc',`limit=${limite + 1}`, `offset=${offset}`];
     if (filtro.empresa !== undefined) partes.push(`empresa_cnpj=eq.${encodeURIComponent(filtro.empresa)}`);
     const linhas = await this.rest<LinhaAnalise[]>(`analises?${partes.join('&')}`, 'listar as análises');
     return { analises: linhas.slice(0, limite).map(deLinha), temMais: linhas.length > limite };

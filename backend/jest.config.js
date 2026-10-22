@@ -9,6 +9,8 @@ module.exports = {
   testEnvironment: 'node',
   roots: ['<rootDir>/src'],
   testMatch: ['**/*.test.ts'],
+  // Antes de qualquer import: os testes nunca falam com Supabase ou Redis reais.
+  setupFiles: ['<rootDir>/jest.setup.js'],
   transform: {
     '^.+\\.ts$': [
       'ts-jest',

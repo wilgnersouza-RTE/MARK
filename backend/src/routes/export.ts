@@ -5,17 +5,45 @@
 import { Router, Request, Response } from 'express';
 import * as XLSX from 'xlsx';
 import { authenticate } from '../middleware/auth';
-import { sessionService } from '../services/session';
 import { excelExportService } from '../services/export';
 import { dashboardService } from '../services/dashboard';
 import { filtrarDocumentos, lerFiltros } from '../utils/filtros';
+import {
+  AVISO_SEM_ANALISES,
+  ConjuntoEmpresa,
+  OrigemDocumentos,
+  formatarCnpj,
+  origemDosDocumentos,
+  responderFalhaDoConjunto,
+  tabelaDeImportacoes,
+} from '../services/conjuntoEmpresa';
 
 const router = Router();
+
+/** Sem notas: 400, com o aviso da empresa sem análises quando for o caso. */
+function semDocumentos(res: Response, origem: OrigemDocumentos) {
+  return res.status(400).json({
+    success: false,
+    error: origem.conjunto ? origem.aviso ?? AVISO_SEM_ANALISES : 'Nenhum documento para exportar',
+    timestamp: new Date().toISOString(),
+  });
+}
+
+/** "Conjunto da empresa <nome> (<CNPJ formatado>)". */
+function rotuloOrigem(conjunto: ConjuntoEmpresa): string {
+  return `Conjunto da empresa ${conjunto.nome} (${formatarCnpj(conjunto.cnpj)})`;
+}
+
+/** analise-<cnpj>-conjunto-<AAAA-MM-DD>, sem extensão. */
+function nomeDoConjunto(cnpj: string): string {
+  return `analise-${cnpj}-conjunto-${new Date().toISOString().slice(0, 10)}`;
+}
 
 /**
  * GET /api/v1/export/excel
  * Exportar a análise em Excel. Aceita os mesmos filtros do dashboard
- * (?sentido=&cfop=&ncm=), para a planilha sair com o recorte da tela.
+ * (?sentido=&cfop=&ncm=), para a planilha sair com o recorte da tela, e
+ * ?empresa=<cnpj> para exportar o conjunto da empresa em vez do lote.
  */
 router.get('/excel', authenticate, async (req: Request, res: Response) => {
   try {
@@ -29,14 +57,11 @@ router.get('/excel', authenticate, async (req: Request, res: Response) => {
       });
     }
 
-    const doLote = sessionService.obterDocumentos(sessionId);
+    const origem = await origemDosDocumentos(sessionId, req.query);
+    const doLote = origem.documentos;
 
     if (!doLote || doLote.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Nenhum documento para exportar',
-        timestamp: new Date().toISOString(),
-      });
+      return semDocumentos(res, origem);
     }
 
     const filtros = lerFiltros(req.query);
@@ -54,20 +79,30 @@ router.get('/excel', authenticate, async (req: Request, res: Response) => {
     const dashboard = await dashboardService.generateDashboard(documentos);
 
     // Exportar para Excel
-    const empresa = sessionService.obterSessao(sessionId)?.empresa;
+    const empresa = origem.empresa ?? undefined;
     const temEmpresa = !!empresa;
+    const conjunto = origem.conjunto;
     const buffer = excelExportService.exportarDados(documentos, dashboard, temEmpresa, {
       filtros,
       empresa,
+      ...(conjunto
+        ? {
+            origem: rotuloOrigem(conjunto),
+            importacoes: tabelaDeImportacoes(conjunto, filtros).importacoes,
+          }
+        : {}),
     });
 
     // Enviar arquivo
-    const filename = `nfe-analise-${new Date().getTime()}.xlsx`;
-    
+    const filename = conjunto
+      ? `${nomeDoConjunto(conjunto.cnpj)}.xlsx`
+      : `nfe-analise-${new Date().getTime()}.xlsx`;
+
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(buffer);
   } catch (error: any) {
+    if (responderFalhaDoConjunto(res, error)) return;
     console.error('Erro ao exportar Excel:', error);
     res.status(500).json({
       success: false,
@@ -93,25 +128,37 @@ router.get('/json', authenticate, async (req: Request, res: Response) => {
       });
     }
 
-    const documentos = sessionService.obterDocumentos(sessionId);
+    const origem = await origemDosDocumentos(sessionId, req.query);
+    const documentos = origem.documentos;
 
     if (!documentos || documentos.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Nenhum documento para exportar',
-        timestamp: new Date().toISOString(),
-      });
+      return semDocumentos(res, origem);
     }
 
     const dashboard = await dashboardService.generateDashboard(documentos);
+    const conjunto = origem.conjunto;
 
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="nfe-analise-${new Date().getTime()}.json"`
+      `attachment; filename="${conjunto ? nomeDoConjunto(conjunto.cnpj) : `nfe-analise-${new Date().getTime()}`}.json"`
     );
-    res.send(JSON.stringify({ documentos, dashboard }, null, 2));
+    res.send(
+      JSON.stringify(
+        conjunto
+          ? {
+              origem: rotuloOrigem(conjunto),
+              importacoes: tabelaDeImportacoes(conjunto, {}).importacoes,
+              documentos,
+              dashboard,
+            }
+          : { documentos, dashboard },
+        null,
+        2
+      )
+    );
   } catch (error: any) {
+    if (responderFalhaDoConjunto(res, error)) return;
     console.error('Erro ao exportar JSON:', error);
     res.status(500).json({
       success: false,
